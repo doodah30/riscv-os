@@ -14,7 +14,7 @@ _entry:
     sb zero, 0(a0)
     addi a0, a0, 1
     j 1b
-2:  /* 清零完成，跳到 C 的 start/main */
-    call start
+2:  /* 清零完成，跳到 C 的 main */
+    call main
 spin:
     j spin

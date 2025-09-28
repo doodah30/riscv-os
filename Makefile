@@ -13,9 +13,11 @@ K = kernel
 
 # --------------------------------------------------
 OBJS := \
-    $(K)/entry.o \
-    $(K)/start.o  \
-    $(K)/uart.o
+    $(K)/entry.o  \
+    $(K)/main.o   \
+    $(K)/uart.o   \
+	$(K)/console.o\
+	$(K)/printf.o
 
 OBJS_ALL = $(OBJS)        # 手动列清单
 

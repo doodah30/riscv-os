@@ -1,0 +1,4 @@
+enum {
+  BLACK = 30, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE,
+  RESET = 0
+};

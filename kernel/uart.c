@@ -23,8 +23,22 @@
 #define ReadReg(reg) (*(Reg(reg)))
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
 
+void
+uartinit(void)
+{
+  // special mode to set baud rate.
+    WriteReg(LCR, LCR_BAUD_LATCH);
+
+  // LSB for baud rate of 38.4K.
+    WriteReg(0, 0x03);
+
+  // MSB for baud rate of 38.4K.
+    WriteReg(1, 0x00);
+
+    WriteReg(LCR, LCR_EIGHT_BITS);
+}
 /* 单字节写入（非常简化） */
-void uart_putc(char c) {
+void uartputc(char c) {
     
     while((ReadReg(LSR) & LSR_TX_IDLE) == 0)
     ;
@@ -33,6 +47,6 @@ void uart_putc(char c) {
 }
 
 /* 字符串输出 */
-void uart_puts(const char *s) {
-    while (*s) uart_putc(*s++);
+void uartputs(const char *s) {
+    while (*s) uartputc(*s++);
 }
