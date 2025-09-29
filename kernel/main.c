@@ -11,9 +11,9 @@ void main(void) {
     printf_color(RED,"helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
     clear_line();
     printf("helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    printf("helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
+    printf("helloos %d %x %s %c\n", -2147483648, 0xABCD, "test", 'A');
     goto_xy(10, 3);
     clear_line();
-    printf_color(GREEN,"helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
+    printf_color(GREEN,"helloos %d %x %s %c\n", 2147483647, 0xABCD, "test", 'A');
     while(1){};
 }
