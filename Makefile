@@ -17,7 +17,11 @@ OBJS := \
     $(K)/main.o   \
     $(K)/uart.o   \
 	$(K)/console.o\
-	$(K)/printf.o
+	$(K)/printf.o \
+	$(K)/kalloc.o \
+	$(K)/vm.o     \
+	$(K)/string.o \
+	$(K)/test_vm.o
 
 OBJS_ALL = $(OBJS)        # 手动列清单
 
@@ -27,24 +31,24 @@ all: kernel.elf
 
 # 规则：汇编文件
 $(K)/%.o: $(K)/%.S
-	$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 # 规则：C 文件
 $(K)/%.o: $(K)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 # 链接
 kernel.elf: $(OBJS_ALL)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS_ALL)
+	@$(CC) $(LDFLAGS) -o $@ $(OBJS_ALL)
 
 # 生成二进制镜像
 kernel.bin: kernel.elf
-	$(OBJCOPY) -O binary kernel.elf kernel.bin
+	@$(OBJCOPY) -O binary kernel.elf kernel.bin
 
 # QEMU 运行
 qemu: kernel.elf
-	qemu-system-riscv64 -machine virt -nographic -bios none -kernel kernel.elf
+	@qemu-system-riscv64 -machine virt -nographic -bios none -kernel kernel.elf
 
 # 清理
 clean:
-	rm -f $(K)/*.o kernel.elf kernel.bin
+	@rm -f $(K)/*.o kernel.elf kernel.bin

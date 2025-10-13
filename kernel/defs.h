@@ -23,6 +23,7 @@ void            clear_line(void);
 // printf.c
 void            printf(const char *fmt, ...);
 void            printf_color(int color, const char *fmt, ...);
+void            panic(char *s);
 // proc.c
 
 // swtch.S

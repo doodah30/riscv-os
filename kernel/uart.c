@@ -1,6 +1,5 @@
 #include <stdint.h>
-
-#define UART0 0x10000000UL
+#include "memlayout.h"
 
 #define Reg(reg) ((volatile unsigned char *)(UART0 + reg))
 
