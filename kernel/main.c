@@ -1,24 +1,33 @@
+// kernel/main.c
 #include "types.h"
+#include "param.h"
 #include "memlayout.h"
+#include "riscv.h"
 #include "defs.h"
 #include "kmem.h"
-//__attribute__ ((aligned (16))) char stack0[4096 * NCPU];
-extern void run_vm_tests(void);
-extern char end[];       // 从链接ger脚本中获取 end
+
+extern char end[]; // 从链接器脚本获取
+
 void main(void) {
+    // 初始化控制台
     consoleinit();
+    printf("booting helloos...\n");
+    
+    // 初始化物理内存分配器
     kinit((void*)end, (void*)PHYSTOP);
-    run_vm_tests();
-    /*
-    clear();  // 清屏
-    printf("helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    printf_color(RED,"helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    clear_line();
-    printf("helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    printf("helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    goto_xy(10, 3);
-    clear_line();
-    printf_color(GREEN,"helloos %d %x %s %c\n", 123, 0xABCD, "test", 'A');
-    */
+    
+    // 初始化中断控制器
+    plicinit();
+    plicinithart();
+
+    // 初始化S模式的中断向量
+    trapinithart();
+    
+    // 开启 supervisor 模式的中断
+    intr_on();
+
+    printf("setup complete; waiting for interrupts.\n");
+
+    // 等待中断发生
     while(1){};
 }

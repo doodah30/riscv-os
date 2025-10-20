@@ -1,4 +1,7 @@
+#ifndef DEFS_H
+#define DEFS_H
 
+#include "types.h"
 // bio.c
 
 
@@ -37,17 +40,21 @@ void            panic(char *s);
 // syscall.c
 
 // trap.c
-
+void            trapinithart(void);
 // uart.c
 void            uartinit(void);
 void            uartputs(const char *s);
 void            uartputc(int);
-
+void            uartintr(void);
 
 // vm.c
 
 // plic.c
-
+void            plicinit(void);
+void            plicinithart(void);
+int             plic_claim(void);
+void            plic_complete(int);
 // virtio_disk.c
+void            virtio_disk_intr(void);
 
-// number of elements in fixed-size array
+#endif // DEFS_H

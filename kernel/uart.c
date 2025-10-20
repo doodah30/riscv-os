@@ -25,16 +25,22 @@
 void
 uartinit(void)
 {
-  // special mode to set baud rate.
+    // 关闭中断
+    WriteReg(IER, 0x00);
+
+    // 设置波特率
     WriteReg(LCR, LCR_BAUD_LATCH);
-
-  // LSB for baud rate of 38.4K.
     WriteReg(0, 0x03);
-
-  // MSB for baud rate of 38.4K.
     WriteReg(1, 0x00);
 
+    // 设置线路控制，并关闭波特率设置模式
     WriteReg(LCR, LCR_EIGHT_BITS);
+
+    // 开启并清空 FIFO 缓冲区
+    WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
+
+    // 重新开启接收中断 (为之后接收键盘输入做准备)
+    WriteReg(IER, IER_RX_ENABLE);
 }
 /* 单字节写入（非常简化） */
 void uartputc(char c) {
@@ -48,4 +54,10 @@ void uartputc(char c) {
 /* 字符串输出 */
 void uartputs(const char *s) {
     while (*s) uartputc(*s++);
+}
+
+void uartintr(void)
+{
+  // 这是一个占位函数，目前什么都不做
+  // 之后我们会在这里处理键盘输入
 }

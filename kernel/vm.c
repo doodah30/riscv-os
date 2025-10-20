@@ -278,7 +278,21 @@ void kvminit(void) {
 #ifdef UART0
     kvmmap(kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
 #endif
+// 映射 VIRTIO 磁盘寄存器
+#ifdef VIRTIO0
+    kvmmap(kernel_pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
+#endif
 
+    // 映射 PLIC 寄存器
+#ifdef PLIC
+    kvmmap(kernel_pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
+#endif
+
+    // 映射 CLINT 寄存器
+#ifdef CLINT
+    // CLINT 区域很小，映射一个页面就足够了
+    kvmmap(kernel_pagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
+#endif
     /* identity-map kernel physical memory [KERNBASE, PHYSTOP) */
 #ifdef KERNBASE
 #ifdef PHYSTOP

@@ -19,6 +19,7 @@ SECTIONS
 
   .data : {
     . = ALIGN(16);
+    PROVIDE(__global_pointer$ = .);
     *(.sdata .sdata.*) /* do not need to distinguish this from .data */
     . = ALIGN(16);
     *(.data .data.*)

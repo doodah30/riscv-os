@@ -4,7 +4,7 @@ CC      = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
 # 编译选项：使用 medany（允许放到 0x80000000 这类地址）
-CFLAGS  = -march=rv64gc -mabi=lp64 -mcmodel=medany -O2 -Wall -ffreestanding -nostdlib
+CFLAGS  = -march=rv64gc -mabi=lp64 -mcmodel=medany -O0 -Wall -ffreestanding -nostdlib -g -fno-omit-frame-pointer
 # 链接选项：使用 medany，并且在链接时也不要链接标准库
 LDFLAGS = -T kernel/kernel.ld -mcmodel=medany -nostdlib
 
@@ -21,7 +21,11 @@ OBJS := \
 	$(K)/kalloc.o \
 	$(K)/vm.o     \
 	$(K)/string.o \
-	$(K)/test_vm.o
+	$(K)/start.o  \
+  	$(K)/plic.o   \
+  	$(K)/trap.o   \
+	$(K)/virtio_disk.o\
+	$(K)/kernelvec.o
 
 OBJS_ALL = $(OBJS)        # 手动列清单
 
@@ -48,6 +52,12 @@ kernel.bin: kernel.elf
 # QEMU 运行
 qemu: kernel.elf
 	@qemu-system-riscv64 -machine virt -nographic -bios none -kernel kernel.elf
+
+# 用于 GDB 调试的规则
+# -S: 启动后冻结CPU，等待GDB连接
+# -s: 在 1234 端口开启GDB服务 (是 -gdb tcp::1234 的简写)
+qemu-gdb: kernel.elf
+	@qemu-system-riscv64 -machine virt -nographic -bios none -kernel kernel.elf -S -s
 
 # 清理
 clean:
