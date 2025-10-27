@@ -65,5 +65,5 @@ void test_timer_interrupt(void) {
 
     uint64 end_time = r_time();
 
-    printf("\nTimer test completed: 5 interrupts occurred in %lu clock cycles.\n", end_time - start_time);
+    printf("\nTimer test completed: 5 interrupts occurred in %llu clock cycles.\n", end_time - start_time);
 }
