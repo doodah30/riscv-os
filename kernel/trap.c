@@ -7,10 +7,10 @@
 
 // 我们用一个 volatile 变量确保编译器不会优化掉它
 volatile uint ticks;
-
+__attribute__ ((aligned (16))) char trap_stack[NCPU][4096];
 extern void uartintr(void);
 extern void virtio_disk_intr(void);
-
+volatile int timer_test_interrupt_count = 0;//testuse
 // 在 kernelvec.S 中，会调用 kerneltrap()
 void kernelvec();
 
@@ -38,13 +38,20 @@ void
 clockintr()
 {
   // 这是一个简单的原子操作，对于我们目前的单线程内核足够了
-  ticks++;
-
+  //timer_test_interrupt_count++;
+  //printf("clock%d\n",timer_test_interrupt_count);
+  //printf("clock\n");
   // 每隔一段时间打印一次，证明时钟在工作
   // 注意：频繁打印会极大地拖慢系统
-  if (ticks % 100 == 0) {
-      printf("tick\n");
+  //if (ticks % 100 == 0) {
+  //    printf("tick\n");
+  //}
+  //printf("clock\n");
+  if(timer_test_interrupt_count>0&&timer_test_interrupt_count<=6){
+    timer_test_interrupt_count++;
+    printf("tick%d",timer_test_interrupt_count);
   }
+  w_stimecmp(r_time() + 1000000);
 }
 
 // 检查是外部中断还是软件中断，并处理它
