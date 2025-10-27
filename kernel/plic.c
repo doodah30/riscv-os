@@ -17,7 +17,6 @@ plicinit(void)
 void
 plicinithart(void)
 {
-  // --- 错误修复在这里 ---
   // 我们的内核目前是单核运行，所以 hart id 总是 0.
   // 我们将 cpuid() 调用替换为硬编码的 0.
   int hart = 0; 
@@ -34,7 +33,6 @@ plicinithart(void)
 int
 plic_claim(void)
 {
-  // --- 同样修复这里 ---
   int hart = 0;
   int irq = *(uint32*)PLIC_SCLAIM(hart);
   return irq;
@@ -44,7 +42,6 @@ plic_claim(void)
 void
 plic_complete(int irq)
 {
-  // --- 同样修复这里 ---
   int hart = 0;
   *(uint32*)PLIC_SCLAIM(hart) = irq;
 }

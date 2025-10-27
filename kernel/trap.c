@@ -54,34 +54,39 @@ clockintr()
 int
 devintr()
 {
+  // 读取 scause 寄存器，它记录了这次 trap 的原因。
   uint64 scause = r_scause();
+  // --- 判断中断类型 ---
 
-  if(scause == 0x8000000000000009L){//其实暂时不会进入此分支
-    // this is a supervisor external interrupt, via PLIC.
-
-    // irq indicates which device interrupted.
+  // scause 最高位为 1 表示是中断，最低几位是中断号。
+  // 中断号 9 代表 Supervisor External Interrupt (来自 PLIC 的外部中断)。
+  if(scause == 0x8000000000000009L){//其实暂时不会进入这个分支
+    // 调用 plic_claim() 查询是哪个外部设备（如 UART）触发了中断。
     int irq = plic_claim();
 
     if(irq == UART0_IRQ){
-      uartintr();
-    } else if(irq == VIRTIO0_IRQ){
+      uartintr();// 调用 UART 的中断处理函数
+    } else if(irq == VIRTIO0_IRQ){// ... 其他设备
       virtio_disk_intr();
     } else if(irq){
       printf("unexpected interrupt irq=%d\n", irq);
     }
 
-    // the PLIC allows each device to raise at most one
-    // interrupt at a time; tell the PLIC the device is
-    // now allowed to interrupt again.
+    // 通知 PLIC，这个中断已经处理完毕，可以接收来自该设备的下一个中断了。
     if(irq)
       plic_complete(irq);
+    return 1; // 返回 1 代表是外部中断
 
-    return 1;
+  // 中断号 5 代表 Supervisor Timer Interrupt (S-mode 时钟中断)。
   } else if(scause == 0x8000000000000005L){
-    // timer interrupt.
+    // 调用我们定义的时钟中断处理函数 clockintr()。
     clockintr();
-    return 2;
+    return 2; // 返回 2 代表是时钟中断
+    
   } else {
+    // 如果 scause 的值不是我们能识别的中断号，
+    // 说明发生了我们尚未处理的异常（如缺页、非法指令）。
+    // 打印所有调试信息，然后调用 panic() 停机，防止系统继续在错误状态下运行。
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");
