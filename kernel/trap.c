@@ -8,11 +8,12 @@
 // 我们用一个 volatile 变量确保编译器不会优化掉它
 volatile uint ticks;
 __attribute__ ((aligned (16))) char trap_stack[NCPU][4096];
+void handle_exception();
 extern void uartintr(void);
 extern void virtio_disk_intr(void);
 volatile int timer_test_interrupt_count = 0;//testuse
 // 在 kernelvec.S 中，会调用 kerneltrap()
-void kernelvec();
+extern void kernelvec();
 
 extern int devintr();
 
@@ -26,12 +27,67 @@ void trapinithart(void)
 // 处理来自 supervisor mode 的中断、异常或系统调用
 // 由 kernelvec.S 调用
 //
-void
-kerneltrap()
-{
-  // devintr() 会处理中断并返回
-  devintr();
+void kerneltrap() {
+    uint64 scause = r_scause();
+
+    // 判断是中断还是异常
+    if (scause & 0x8000000000000000L) {
+        // 最高位是 1, 这是中断
+        devintr();
+    } else {
+        // 最高位是 0, 这是异常
+        handle_exception();
+    }
 }
+
+// --- 统一的异常处理分发函数 ---
+void handle_exception() {
+    uint64 scause = r_scause();
+    uint64 sepc = r_sepc();
+    //uint64 stval = r_stval();
+
+    //printf("\n--- Exception Occurred ---\n");
+    //printf("  scause: 0x%p\n", scause);
+    //printf("  sepc (faulting instruction address): 0x%p\n", sepc);
+    //printf("  stval (faulting address/info): 0x%p\n", stval);
+
+    switch (scause) {
+        case 2: // Illegal instruction
+            printf("  Type: Illegal Instruction\n");
+            // 在内核中，非法指令通常是致命的。
+            panic("Illegal instruction");
+            break;
+
+        case 5: // Load access fault (e.g., reading from an invalid address)
+            printf("  Type: Load Access Fault\n");
+            panic("Load access fault");
+            break;
+
+        case 7: // Store/AMO access fault (e.g., writing to a read-only or invalid address)
+            printf("  Type: Store Access Fault\n");
+            panic("Store access fault");
+            break;
+
+        case 8: // Environment call from U-mode (System Call)
+        case 9: // Environment call from S-mode
+            printf("  Type: System Call (ecall)\n");
+            // 系统调用是一个“有意为之”的异常。
+            // 处理完毕后，我们需要让程序继续执行。
+            // 因此，我们将 sepc + 4，指向 ecall 指令的下一条指令。
+            w_sepc(sepc + 4);
+            // 这里可以根据 a7 寄存器的值来分发具体的系统调用。
+            // for now, we just print a message.
+            printf("  System call handler finished, returning to normal execution.\n");
+            break;
+        
+        default:
+            printf("  Type: Unhandled Exception\n");
+            panic("Unhandled exception");
+            break;
+    }
+    printf("--- Exception Handling Finished ---\n\n");
+}
+
 
 // 时钟中断处理函数
 void
