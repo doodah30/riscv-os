@@ -188,7 +188,7 @@ static int kvmmap(pagetable_t pt, uint64_t va, uint64_t pa, uint64_t size, int p
 }
 
 /* print PTE flags as string */
-static void print_pte_flags(pte_t pte) {
+void print_pte_flags(pte_t pte) {
     char f[9];
     int j = 0;
     f[j++] = (pte & PTE_V) ? 'V' : '-';

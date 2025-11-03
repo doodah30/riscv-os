@@ -25,4 +25,5 @@ void freevm(pagetable_t pagetable, uint64_t sz);
 void print_pagetable(pagetable_t root);
 void kvminit(void);
 void kvminithart(void);
+void print_pte_flags(pte_t pte);
 #endif // VM_H
