@@ -4,7 +4,6 @@
 #include "defs.h"
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #ifndef KMEM_USE_LOCK
 #define KMEM_USE_LOCK 1

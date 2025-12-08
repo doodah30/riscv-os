@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 // pagetable_t is a pointer to a page-sized array of pte_t
-typedef pte_t *pagetable_t;
 
 extern pagetable_t kernel_pagetable;
 

@@ -1,5 +1,6 @@
 // console.c - console device (no lock version)
 #include "types.h"
+#include "riscv.h"
 #include "defs.h"
 
 void consoleinit(void) {

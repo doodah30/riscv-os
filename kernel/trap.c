@@ -3,6 +3,8 @@
 #include "param.h"
 #include "memlayout.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
 #include "defs.h"
 
 // 我们用一个 volatile 变量确保编译器不会优化掉它
@@ -21,6 +23,7 @@ extern int devintr();
 void trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
+  w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
 }
 
 //
@@ -28,16 +31,38 @@ void trapinithart(void)
 // 由 kernelvec.S 调用
 //
 void kerneltrap() {
+    int which_dev = 0;
+    uint64 sepc = r_sepc();           // 1. 保存发生陷阱时的 PC
+    uint64 sstatus = r_sstatus();     // 2. 保存状态寄存器
     uint64 scause = r_scause();
+
+    // 检查是否来自内核态 (S-mode)
+    if((sstatus & SSTATUS_SPP) == 0)
+        panic("kerneltrap: not from supervisor mode");
+    
+    // 检查中断是否已关闭
+    if(intr_get() != 0)
+        panic("kerneltrap: interrupts enabled");
 
     // 判断是中断还是异常
     if (scause & 0x8000000000000000L) {
-        // 最高位是 1, 这是中断
-        devintr();
+        // 是中断，调用 devintr 并获取返回值
+        which_dev = devintr();
     } else {
-        // 最高位是 0, 这是异常
+        // 是异常
         handle_exception();
     }
+
+    // --- 核心调度逻辑 ---
+    // 如果是时钟中断 (which_dev == 2) 且当前有进程在运行，则让出 CPU
+    if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING) {
+        yield();
+    }
+
+    // yield() 返回后，说明进程再次被调度运行了
+    // 必须恢复之前保存的寄存器，准备返回中断点
+    w_sepc(sepc);
+    w_sstatus(sstatus);
 }
 
 // --- 统一的异常处理分发函数 ---

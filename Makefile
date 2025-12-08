@@ -25,7 +25,10 @@ OBJS := \
   	$(K)/plic.o   \
   	$(K)/trap.o   \
 	$(K)/virtio_disk.o\
-	$(K)/kernelvec.o
+	$(K)/kernelvec.o \
+    $(K)/proc.o   \
+    $(K)/swtch.o  \
+	$(K)/spinlock.o
 
 OBJS_ALL = $(OBJS)        # 手动列清单
 

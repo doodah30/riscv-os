@@ -59,6 +59,7 @@ start()
   // --- 传递核心 ID ---
   // 读取当前 CPU 核心的硬件 ID (hart id)。
   int id = r_mhartid();
+  asm volatile("mv tp, %0" : : "r" (id));
   // 将这个 ID 保存到 tp (Thread Pointer) 寄存器中。
   // 这是一个约定，让 S-mode 的代码可以随时通过读取 tp 寄存器来知道自己正在哪个核心上运行。
   w_tp(id);

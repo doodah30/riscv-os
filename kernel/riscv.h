@@ -10,6 +10,7 @@
 #define PGSHIFT 12UL
 
 typedef uint64_t pte_t;
+typedef pte_t *pagetable_t;
 
 // PTE flag bits
 #define PTE_V (1UL << 0)
@@ -97,17 +98,14 @@ w_mstatus(uint64 x)
 #define SSTATUS_SIE (1L << 1)  // Supervisor Interrupt Enable
 #define SSTATUS_UIE (1L << 0)  // User Interrupt Enable
 
-static inline uint64
-r_sstatus()
-{
+static inline uint64 r_sstatus() {
   uint64 x;
   asm volatile("csrr %0, sstatus" : "=r" (x) );
   return x;
 }
 
-static inline void 
-w_sstatus(uint64 x)
-{
+// 写 sstatus
+static inline void w_sstatus(uint64 x) {
   asm volatile("csrw sstatus, %0" : : "r" (x));
 }
 
@@ -222,6 +220,7 @@ w_sip(uint64 x)
 //这是一个中断使能掩码，用来分别控制是否允许 S-mode 响应外部中断 (SEIE)、时钟中断 (STIE) 等。
 #define SIE_SEIE (1L << 9) // external
 #define SIE_STIE (1L << 5) // timer
+#define SIE_SSIE (1L << 1)
 static inline uint64
 r_sie()
 {
@@ -255,23 +254,18 @@ w_mie(uint64 x)
 
 //通过修改 sstatus 寄存器的 SIE (Supervisor Interrupt Enable) 位
 //全局性地开启或关闭所有 S-mode 中断。这是中断控制的“总闸门”。
-static inline void
-intr_on()
-{
+// 开启中断
+static inline void intr_on() {
   w_sstatus(r_sstatus() | SSTATUS_SIE);
 }
 
-// disable device interrupts
-static inline void
-intr_off()
-{
+// 关闭中断
+static inline void intr_off() {
   w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 
-// are device interrupts enabled?
-static inline int
-intr_get()
-{
+// 获取中断状态 (1=开, 0=关)
+static inline int intr_get() {
   uint64 x = r_sstatus();
   return (x & SSTATUS_SIE) != 0;
 }
@@ -297,16 +291,12 @@ static inline uint64
 r_stimecmp()
 {
   uint64 x;
-  // asm volatile("csrr %0, stimecmp" : "=r" (x) );
-  asm volatile("csrr %0, 0x14d" : "=r" (x) );
+  asm volatile("csrr %0, stimecmp" : "=r" (x) );
   return x;
 }
 
-static inline void 
-w_stimecmp(uint64 x)
-{
-  // asm volatile("csrw stimecmp, %0" : : "r" (x));
-  asm volatile("csrw 0x14d, %0" : : "r" (x));
+static inline void w_stimecmp(uint64 x) {
+  asm volatile("csrw stimecmp, %0" : : "r" (x));
 }
 
 //读/写 menvcfg (Machine Environment Configuration) 寄存器。

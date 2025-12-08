@@ -1,86 +1,87 @@
-## **项目状态**
+本分支包含 **从零构建操作系统** 课程实验5的完整实现代码。
+在此阶段，内核已经从单线程裸机程序进化为一个**支持抢占式多任务（Preemptive Multitasking）** 的微型操作系统内核。
 
-当前，本分支已经完成了一个重要的里程碑：**成功实现了中断处理框架与时钟管理**。
+## 实验目标
+- 实现进程控制块（PCB）和进程状态管理。
+- 实现上下文切换（Context Switch）机制。
+- 实现基于时间片的轮转调度器（Round-Robin Scheduler）。
+- 实现时钟中断驱动的抢占式调度。
+- 实现基础的进程同步机制（自旋锁、Sleep/Wakeup）。
 
-这意味着内核不再是一个只能顺序执行指令的静态程序，而是变成了一个能够响应外部异步事件的动态系统。这是实现所有现代操作系统并发功能（如多任务调度）的基石。
+## 完成功能
+- **进程抽象**：定义了 `struct proc`，支持 `UNUSED`, `RUNNING`, `RUNNABLE`, `SLEEPING` 等状态。
+- **上下文切换**：编写 `swtch.S` 汇编代码，实现了内核线程间的寄存器保存与恢复。
+- **调度器**：实现了 `scheduler()` 核心循环，能够公平地调度多个内核线程。
+- **抢占机制**：利用 RISC-V S 模式时钟中断，在 `kerneltrap()` 中触发 `yield()`，强制长任务让出 CPU。
+- **同步原语**：实现了 `sleep()` 和 `wakeup()`，并通过生产者-消费者模型验证了其正确性。
 
-### **已实现的核心功能**
+## 关键文件说明
 
-*   **基础启动流程**: 内核能够从 QEMU 模拟的 `virt` 机器上正确启动，完成从 M-mode 到 S-mode 的权限切换。
-*   **内存管理**: 实现了基于页表的虚拟内存管理，包括内核空间的映射和物理内存的分配（`kalloc`/`kfree`）。
-*   **控制台 I/O**: 实现了基于 UART 的 `printf` 函数，提供了内核与用户交互的基础通道。
-*   **中断处理**:
-    *   构建了符合 RISC-V 架构的 S-mode 统一 trap 处理机制。
-    *   实现了对 **S-mode 时钟中断 (Supervisor Timer Interrupt)** 的正确响应和处理。
-    *   集成了对 **PLIC (Platform-Level Interrupt Controller)** 的驱动，为未来响应外部设备（如键盘、磁盘）中断做好了准备。
-*   **时钟管理**:
-    *   通过配置 RISC-V 的硬件定时器，实现了周期性的时钟中断。
-    *   在控制台周期性打印 "tick" 信息，直观地展示了时钟中断正在正常工作。
+| 文件路径 | 说明 |
+| :--- | :--- |
+| `kernel/proc.h` | 定义进程结构体 `struct proc` 和上下文 `struct context` |
+| `kernel/proc.c` | **核心实现**：进程创建(`allocproc`)、调度器(`scheduler`)、休眠唤醒(`sleep/wakeup`) |
+| `kernel/swtch.S` | **核心汇编**：实现上下文切换的汇编代码 |
+| `kernel/trap.c` | 修改了 `kerneltrap`，在时钟中断时检查并调用 `yield()` |
+| `kernel/main.c` | 修改了启动流程，显式开启 S 模式中断分闸 (`sie`)，启动调度器 |
+| `kernel/riscv.h` | 修正了 CSR 寄存器定义和中断相关的宏 |
 
-## **如何构建与运行**
+## 编译与运行
 
-### **环境要求**
-
-1.  **RISC-V 交叉编译工具链**: 你需要一个标准的 `riscv64-unknown-elf-` 工具链（包含 GCC, Binutils, GDB 等）。
-2.  **QEMU**: 需要支持 `riscv64` 架构的 QEMU (`qemu-system-riscv64`)。
-
-### **编译**
-
-在项目根目录下，直接运行 `make` 即可。
-
-```bash
-make
-```
-
-这将编译所有内核源代码，并链接生成一个名为 `kernel.elf` 的内核镜像。
-
-### **运行**
-
-使用 `make qemu` 命令来启动 QEMU 并运行内核。
+确保已安装 RISC-V 工具链和 QEMU。
 
 ```bash
+# 编译并启动 QEMU
 make qemu
+
+# 退出 QEMU
+# 按 Ctrl+A，然后松开按 X
 ```
 
-如果一切正常，你将看到类似以下的输出，并且 "tick" 会周期性地出现：
+## 测试结果与解析
 
-```
+系统启动后会自动运行 `test_runner`，依次启动多个测试进程。以下是预期的正确输出日志及其含义：
+
+```text
 booting helloos...
-setup complete; waiting for interrupts.
-tick
-tick
-tick
+kernel init done, starting processes...
+Userinit: Created test_runner process (PID 1)
+
+=== Starting Experiment 5 Tests ===
+[Test] Process Creation...
+SUCCESS: Created processes PID 2 and 3  <-- 进程创建/分配测试通过
+
+=== Process Table ===
+PID: 1 | State: RUNNING
+PID: 2 | State: RUNNABLE
+PID: 3 | State: RUNNABLE
+=====================
+
+... (测试任务启动) ...
+
+Simple task running (PID 2)
+Simple task running (PID 3)
+Producer: Produced 10           <-- 生产者生产数据
+Task PID 6 running iteration 0
+...
+Task PID 6 running iteration 3  <-- PID 6 正在执行长循环
+Task PID 7 running iteration 0  <-- 【关键】PID 6 被强行打断，PID 7 插队运行（抢占成功）
+Task PID 7 running iteration 1
+...
+Consumer: Consumed 10           <-- 【关键】消费者被唤醒并消费数据（同步成功）
+Producer: Produced 20
+Task PID 6 finished.            <-- PID 6 终于轮回来执行完毕
 ...
 ```
 
-要退出 QEMU，通常可以按下 `Ctrl+A` 然后按 `X`。
+### 结果分析
+1.  **轮转调度**：可以看到 PID 2, 3, 6, 7, 8 交替输出，证明调度器工作正常。
+2.  **抢占验证**：PID 6 在打印 `iteration 3` 后并没有立即打印 `finished`，而是被 PID 7 和 Consumer 插入，证明时钟中断成功打断了正在运行的进程。
+3.  **同步验证**：Consumer 严格在 Producer 生产后才进行消费，证明 `sleep` 和 `wakeup` 逻辑正确，且锁机制有效。
 
-### **调试**
-
-本项目支持使用 GDB进行源码级调试。
-
-1.  **在第一个终端**，启动 QEMU 并使其等待 GDB 连接：
-    ```bash
-    make qemu-gdb
-    ```
-
-2.  **在第二个终端**，启动 GDB 并连接：
-    ```bash
-    riscv64-unknown-elf-gdb
-    ```
-    在 GDB 内部，输入以下命令来加载符号文件并连接到 QEMU：
-    ```gdb
-    (gdb) file kernel.elf
-    (gdb) target remote localhost:1234
-    ```
-    现在，你可以使用标准的 GDB 命令（如 `b`, `c`, `n`, `si`, `p`）来调试内核了。
-
-## **下一步计划**
-
-在实现了中断和时钟的基础上，接下来的核心目标是：
-
-*   **进程管理**: 实现 `proc` 结构体，创建第一个用户进程。
-*   **抢占式调度**: 利用时钟中断，实现一个简单的轮转调度器 (Round-Robin Scheduler)。
-*   **系统调用**: 构建完整的系统调用接口，让用户进程能够与内核交互。
+## 实现细节注意
+- **中断开启**：为了解决裸机环境下 S 模式中断默认关闭的问题，我们在 `kernel/main.c` 中显式调用了 `w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);`。
+- **内核栈**：每个进程在 `allocproc` 时通过 `kalloc` 分配了独立的内核栈，防止栈溢出或数据覆盖。
+- **自旋锁**：在进程切换前后，严格遵守了锁的获取与释放规则，防止死锁。
 
 ---

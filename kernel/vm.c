@@ -4,7 +4,6 @@
 #include "kmem.h"
 #include "riscv.h"
 #include "defs.h"
-#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
 
