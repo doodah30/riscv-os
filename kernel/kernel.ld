@@ -7,6 +7,11 @@ SECTIONS
 
   .text : {
     *(.text .text.*)
+    . = ALIGN(0x1000);       /* 确保 trampoline 对齐到 4KB 页边界 */
+    _trampoline = .;         /* 定义 trampoline 开始位置 */
+    *(trampsec)              /* 放入 trampoline.S 中的代码 */
+    . = ALIGN(0x1000);       /* 再次对齐，确保它独占一页 */
+    ASSERT(. - _trampoline == 0x1000, "error: trampoline larger than one page");
     PROVIDE(etext = .);
   }
 

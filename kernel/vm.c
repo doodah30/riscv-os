@@ -14,6 +14,7 @@ static pagetable_t alloc_pagetable_page(void) {
     void *p = kalloc();
     if (!p) return NULL;
     // kalloc already zeros page
+    memset(p, 0, PGSIZE);
     return (pagetable_t)p;
 }
 
@@ -267,41 +268,35 @@ void print_pagetable(pagetable_t root) {
     printf("=== end print_pagetable ===\n");
 }
 
-/* kvminit: build kernel pagetable (but do not write satp) */
+extern char trampoline[]; 
+
 void kvminit(void) {
-    if (kernel_pagetable) return;
-    kernel_pagetable = proc_pagetable_create();
-    if (!kernel_pagetable) panic("kvminit: cannot alloc kernel_pagetable");
+  if (kernel_pagetable) return;
+  kernel_pagetable = proc_pagetable_create();
+  if (!kernel_pagetable) panic("kvminit: cannot alloc kernel_pagetable");
 
-    /* map devices: UART0 */
-#ifdef UART0
-    kvmmap(kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
-#endif
-// 映射 VIRTIO 磁盘寄存器
-#ifdef VIRTIO0
-    kvmmap(kernel_pagetable, VIRTIO0, PGSIZE, VIRTIO0, PTE_R | PTE_W);
-#endif
+  // 1. 映射 UART0 (这个你写对了)
+  // kvmmap(pt, va, pa, size, perm)
+  if(kvmmap(kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W) < 0)
+      panic("kvminit: uart0");
 
-    // 映射 PLIC 寄存器
-#ifdef PLIC
-    kvmmap(kernel_pagetable, PLIC, 0x400000, PLIC, PTE_R | PTE_W);
-#endif
+  // 2. 映射 VIRTIO0 (这个也对了)
+  if(kvmmap(kernel_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W) < 0)
+      panic("kvminit: virtio0");
 
-    // 映射 CLINT 寄存器
-#ifdef CLINT
-    // CLINT 区域很小，映射一个页面就足够了
-    kvmmap(kernel_pagetable, CLINT, 0x10000, CLINT, PTE_R | PTE_W);
-#endif
-    /* identity-map kernel physical memory [KERNBASE, PHYSTOP) */
-#ifdef KERNBASE
-#ifdef PHYSTOP
-    kvmmap(kernel_pagetable, KERNBASE, KERNBASE, PHYSTOP - KERNBASE, PTE_R | PTE_W | PTE_X);
-#else
-#warning "PHYSTOP not defined; kernel physical memory mapping skipped"
-#endif
-#else
-#warning "KERNBASE not defined; kernel memory mapping skipped"
-#endif
+  // 3. === 修正 PLIC ===
+  // 以前：kvmmap(..., PLIC, 0x400000, PLIC, ...) <--- 错的！
+  // 现在：
+  if(kvmmap(kernel_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W) < 0)
+      panic("kvminit: plic");
+
+  // 4. 映射 内核代码 (这个也对了)
+  if(kvmmap(kernel_pagetable, KERNBASE, KERNBASE, (uint64)PHYSTOP - KERNBASE, PTE_R | PTE_W | PTE_X) < 0)
+      panic("kvminit: kernel data");
+
+  // 5. 映射 Trampoline (这个也对了)
+  if(kvmmap(kernel_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X) < 0)
+      panic("kvminit: trampoline");
 }
 
 /* kvminithart: write kernel_pagetable -> satp and sfence.vma */
@@ -312,4 +307,181 @@ void kvminithart(void) {
     uint64_t satp_val = (SATP_MODE_SV39 << 60) | root_ppn;
     asm volatile("csrw satp, %0" :: "r"(satp_val) : "memory");
     asm volatile("sfence.vma" ::: "memory");
+}
+
+#ifndef PGROUNDDOWN
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+#endif
+
+// 1. 创建一个空的用户页表
+// 实际上就是调用你现有的 proc_pagetable_create
+pagetable_t uvmcreate() {
+  pagetable_t pagetable;
+  
+  // 1. 分配页表页 (确保你的 alloc_pagetable_page 里有 memset 0)
+  pagetable = proc_pagetable_create(); 
+  if(pagetable == 0) return 0;
+
+  // 2. === 关键修复：映射 Trampoline 到用户页表 ===
+  // 这样当 satp 切换到用户页表后，CPU 依然能在高地址找到代码执行
+  if(mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X) < 0){
+    // 如果失败，释放刚才分配的页表
+    // freevm(pagetable, 0); // 暂时简化，直接 panic
+    panic("uvmcreate: mappages trampoline");
+    return 0;
+  }
+  
+  return pagetable;
+}
+
+// 2. 加载 initcode 到用户页表的起始位置 (虚拟地址 0)
+// 这是第一个用户进程诞生的关键
+void uvmfirst(pagetable_t pagetable, uchar *src, uint sz) {
+  char *mem;
+
+  if(sz >= PGSIZE)
+    panic("uvmfirst: more than a page");
+  
+  // 分配一个物理页
+  mem = kalloc();
+  memset(mem, 0, PGSIZE);
+  
+  // 将物理页映射到虚拟地址 0
+  // 权限：用户可读(R)、可写(W)、可执行(X)、用户态可访问(U)
+  if(mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U) < 0) {
+    panic("uvmfirst: mappages");
+  }
+  
+  // 将代码复制到物理页中
+  memmove(mem, src, sz);
+}
+
+// 3. 从用户空间复制数据到内核 (Copy In)
+// 例如：系统调用 write(fd, buf, len)，内核需要从用户 buf 读取数据
+int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) {
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(srcva);
+    // walkaddr 是你代码里已经有的函数，它会检查 PTE_U 权限
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    
+    n = PGSIZE - (srcva - va0);
+    if(n > len)
+      n = len;
+    
+    // 从物理地址复制到内核 dst
+    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+
+    len -= n;
+    dst += n;
+    srcva = va0 + PGSIZE;
+  }
+  return 0;
+}
+
+// 4. 从内核复制数据到用户空间 (Copy Out)
+// 例如：系统调用 read(fd, buf, len)，内核将读取的数据填入用户 buf
+int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(dstva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    
+    n = PGSIZE - (dstva - va0);
+    if(n > len)
+      n = len;
+    
+    // 从内核 src 复制到物理地址
+    memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+    len -= n;
+    src += n;
+    dstva = va0 + PGSIZE;
+  }
+  return 0;
+}
+
+// 为 sbrk 用：分配或释放用户内存
+// 从 oldsz 调整到 newsz
+// 返回新的大小，失败返回 -1 (0xff...ff)
+uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
+  if(newsz >= oldsz) return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    // unmap_pages 是你之前写过的，这里简化调用，确保你 vm.c 里有这个逻辑
+    // 或者我们手动释放
+    for(uint64 a = PGROUNDUP(newsz); a < PGROUNDUP(oldsz); a += PGSIZE){
+      pte_t *pte = walk(pagetable, a, 0);
+      if(pte && (*pte & PTE_V)){
+        uint64 pa = pte_to_pa(*pte);
+        kfree((void*)PA2VA(pa));
+        *pte = 0;
+      }
+    }
+  }
+  return newsz;
+}
+
+// 对应 uvmalloc (增长内存)
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
+  char *mem;
+  uint64 a;
+
+  if(newsz < oldsz) return oldsz;
+
+  a = PGROUNDUP(oldsz);
+  for(; a < newsz; a += PGSIZE){
+    mem = kalloc();
+    if(mem == 0){
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) < 0){
+      kfree(mem);
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+// 为 fork 用：复制父进程的页表和内存到子进程
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  char *mem;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    
+    pa = pte_to_pa(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)PA2VA(pa), PGSIZE);
+
+    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+ err:
+  // 发生错误，释放新分配的页面
+  // unmap_pages(new, 0, i, 1); // 假设你有这个清理函数
+  return -1;
 }

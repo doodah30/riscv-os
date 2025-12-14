@@ -1,5 +1,6 @@
 // kernel/trap.c
 #include "types.h"
+#include "vm.h"
 #include "param.h"
 #include "memlayout.h"
 #include "riscv.h"
@@ -8,7 +9,9 @@
 #include "defs.h"
 
 // 我们用一个 volatile 变量确保编译器不会优化掉它
-volatile uint ticks;
+extern pagetable_t kernel_pagetable;
+struct spinlock tickslock;
+uint ticks;
 __attribute__ ((aligned (16))) char trap_stack[NCPU][4096];
 void handle_exception();
 extern void uartintr(void);
@@ -18,6 +21,15 @@ volatile int timer_test_interrupt_count = 0;//testuse
 extern void kernelvec();
 
 extern int devintr();
+
+extern void trampoline(); 
+extern void uservec();
+extern void userret();
+
+// 初始化时钟锁
+void trapinit(void) {
+  initlock(&tickslock, "time");
+}
 
 // S模式下的陷阱初始化
 void trapinithart(void)
@@ -118,21 +130,13 @@ void handle_exception() {
 void
 clockintr()
 {
-  // 这是一个简单的原子操作，对于我们目前的单线程内核足够了
-  //timer_test_interrupt_count++;
-  //printf("clock%d\n",timer_test_interrupt_count);
-  //printf("clock\n");
-  // 每隔一段时间打印一次，证明时钟在工作
-  // 注意：频繁打印会极大地拖慢系统
-  //if (ticks % 100 == 0) {
-  //    printf("tick\n");
-  //}
-  //printf("clock\n");
-  if(timer_test_interrupt_count>0&&timer_test_interrupt_count<=6){
-    timer_test_interrupt_count++;
-    printf("tick%d",timer_test_interrupt_count);
-  }
-  w_stimecmp(r_time() + 1000000);
+  acquire(&tickslock); // 获取锁
+  ticks++;             // 计数增加
+  wakeup(&ticks);      // 唤醒所有在 sleep(&ticks) 的进程
+  release(&tickslock); // 释放锁
+
+  // 设置下一次中断
+  w_stimecmp(r_time() + 100000); 
 }
 
 // 检查是外部中断还是软件中断，并处理它
@@ -180,4 +184,101 @@ devintr()
     panic("kerneltrap");
     return 0;
   }
+}
+
+// --- 核心：用户态陷阱处理 ---
+void usertrap(void) {
+  int which_dev = 0;
+
+  if((r_sstatus() & SSTATUS_SPP) != 0)
+    panic("usertrap: not from user mode");
+
+  // 1. 设置 stvec 为 kernelvec，因为现在我们在内核了
+  w_stvec((uint64)kernelvec);
+
+  struct proc *p = myproc();
+  
+  // 2. 保存用户 PC (sepc)
+  p->trapframe->epc = r_sepc();
+  
+  uint64 scause = r_scause();
+
+  if(scause == 8) {
+    // 3. 系统调用 (ecall from U-mode)
+    if(p->killed)
+      exit(-1);
+
+    // sepc 指向 ecall 指令，返回时要跳过它 (+4)
+    p->trapframe->epc += 4;
+
+    // 开启中断，允许在系统调用期间被抢占
+    intr_on();
+    syscall();
+  } else if((which_dev = devintr()) != 0) {
+    // 4. 设备中断
+  } else {
+    printf("usertrap(): unexpected scause %p pid=%d\n", scause, p->pid);
+    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    p->killed = 1;
+  }
+
+  if(p->killed) exit(-1);
+
+  if(which_dev == 2) yield(); // 时间片到了
+
+  usertrapret(); // 返回用户态
+}
+
+// --- 核心：返回用户态 ---
+void usertrapret(void) {
+  struct proc *p = myproc();
+
+  // 1. 关中断
+  intr_off();
+
+  // 2. 发送 trampoline 代码的位置
+  uint64 trampoline_uservec = TRAMPOLINE + (uint64)uservec - (uint64)trampoline;
+  w_stvec(trampoline_uservec);
+
+  // 3. 填充 Trapframe (供下一次从用户态进入内核时使用)
+  p->trapframe->kernel_satp = r_satp();         
+  p->trapframe->kernel_sp = p->kstack + PGSIZE; 
+  p->trapframe->kernel_trap = (uint64)usertrap; 
+  p->trapframe->kernel_hartid = r_tp();         
+
+  // 4. 设置 SSTATUS (进入用户态前开启中断 SPIE=1, 模式 SPP=0)
+  unsigned long x = r_sstatus();
+  x &= ~SSTATUS_SPP; 
+  x |= SSTATUS_SPIE; 
+  w_sstatus(x);
+
+  // 5. 设置 SEPC (用户程序入口)
+  w_sepc(p->trapframe->epc);
+
+  // 6. 准备用户页表的 SATP 值
+  uint64 satp = MAKE_SATP(p->pagetable);
+  
+  // 手动查表：看看用户页表里有没有 TRAMPOLINE 的映射
+  pte_t *pte = walk(p->pagetable, TRAMPOLINE, 0);
+  
+  if(pte == 0) {
+      panic("FATAL: Trampoline NOT mapped in User Page Table (PTE missing)!");
+  }
+  if((*pte & PTE_V) == 0) {
+      panic("FATAL: Trampoline PTE is invalid in User Page Table!");
+  }
+  
+  // 检查物理地址是否对齐
+  uint64 pa = pte_to_pa(*pte);
+  
+  if(pa != 0x80004000) { // 这里填你之前 nm 看到的地址
+      printf("WARNING: PA mismatch! Expected 0x80004000\n");
+  }
+  // ===================================
+
+  // 7. 计算跳转目标
+  uint64 fn = TRAMPOLINE + (uint64)userret - (uint64)trampoline;
+  
+  // 8. 真正的跳转
+  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
 }

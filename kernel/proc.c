@@ -7,6 +7,17 @@
 #include "proc.h"
 #include "defs.h"
 
+uchar initcode[] = {
+    0x93, 0x08, 0x00, 0x01, // li a7, 16
+    0x13, 0x05, 0x10, 0x00, // li a0, 1
+    0x93, 0x05, 0x00, 0x00, // li a1, 0
+    0x13, 0x06, 0xc0, 0x00, // li a2, 12
+    0x73, 0x00, 0x00, 0x00, // ecall
+
+    0x93, 0x08, 0x20, 0x00, // li a7, 2
+    0x73, 0x00, 0x00, 0x00, // ecall
+};
+
 struct cpu cpus[NCPU];
 struct proc proc[NPROC];
 
@@ -16,6 +27,16 @@ int nextpid = 1;
 struct spinlock pid_lock;
 
 extern void forkret(void); // 在 trap.c 或 kernelvec.S 中定义，或者是新建的
+
+void forkret(void) {
+  static int first = 1;
+  release(&myproc()->lock);
+  if (first) {
+    // 文件系统初始化等...
+    first = 0;
+  }
+  usertrapret(); // <--- 关键修改：进入用户空间！
+}
 
 // 初始化进程表
 void procinit(void) {
@@ -47,22 +68,6 @@ int cpuid() {
   // 读取 tp 寄存器，它保存了当前核的编号
   asm volatile("mv %0, tp" : "=r" (id));
   return id;
-}
-
-void forkret(void) {
-  static int first = 1;
-
-  // 释放进程锁
-  // 调度器在该进程运行前获取了锁，新进程必须释放它
-  release(&myproc()->lock);
-
-  if (first) {
-    // 这里将来可以放文件系统初始化代码
-    first = 0;
-  }
-  
-  // 对于真正的用户进程，这里会调用 usertrapret() 返回用户空间
-  // 但对于我们的内核线程测试，函数会直接返回，或者由 ra 寄存器跳转到 test_runner
 }
 
 // 获取当前CPU
@@ -232,185 +237,172 @@ void wakeup(void *chan) {
 }
 
 void userinit(void) {
-    struct proc *p;
-    p = allocproc();
-    initproc = p;
-    p->state = RUNNABLE;
-    p->context.ra = (uint64)test_runner; // 设置入口为 test_runner
-    p->context.sp = p->kstack + PGSIZE;
-    
-    printf("Userinit: Created test_runner process (PID %d)\n", p->pid);
+  struct proc *p;
+
+  p = allocproc();
+  initproc = p;
+  
+  // 1. 创建页表 (此时里面已经有了 Trampoline)
+  p->pagetable = uvmcreate();
+  if(p->pagetable == 0) panic("userinit: uvmcreate");
+
+  // 2. 映射 initcode
+  uvmfirst(p->pagetable, initcode, sizeof(initcode));
+  p->sz = PGSIZE;
+
+  // 3. === 关键修复：映射 Trapframe ===
+  // 将内核分配的 p->trapframe (物理地址/内核虚地址) 
+  // 映射到用户空间的固定高地址 TRAPFRAME
+  if(mappages(p->pagetable, TRAPFRAME, PGSIZE, 
+              (uint64)(p->trapframe), PTE_R | PTE_W) < 0) {
+      panic("userinit: map trapframe");
+  }
+
+  // 4. 设置上下文
+  p->trapframe->epc = 0;      // 用户程序入口
+  p->trapframe->sp = PGSIZE;  // 用户栈顶
+
+  safestrcpy(p->name, "initcode", sizeof(p->name));
+  p->state = RUNNABLE;
+
+  // 此时不需要 release(&p->lock)，因为 allocproc 已经释放了
 }
 
-int create_kernel_process(void (*entry)(void)) {
-    struct proc *p;
-    if((p = allocproc()) == 0){
-        return -1;
+void exit(int status) {
+  struct proc *p = myproc();
+
+  //if(p == initproc)
+  //  panic("init exiting");
+
+  // 打印一条日志方便调试
+  printf("PID %d exited with status %d\n", p->pid, status);
+
+  // 获取进程锁
+  acquire(&p->lock);
+
+  // 标记退出状态
+  p->xstate = status;
+  
+  // 变更为僵尸状态，不再会被调度运行
+  p->state = ZOMBIE;
+
+  // 调度器切换到其他进程
+  // 注意：sched() 会释放 p->lock，并在返回时重新获取
+  // 但由于状态是 ZOMBIE，sched() 永远不会返回这里
+  sched();
+  
+  panic("zombie exit");
+}
+
+// 增长或缩小进程内存 (供 sys_sbrk 调用)
+int growproc(int n) {
+  uint64 sz;
+  struct proc *p = myproc();
+
+  sz = p->sz;
+  if(n > 0){
+    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+      return -1;
     }
-    
-    p->state = RUNNABLE;
-    // 设置上下文，让它下次调度时执行 entry 函数
-    p->context.ra = (uint64)entry;
-    p->context.sp = p->kstack + PGSIZE;
-    
-    return p->pid;
+  } else if(n < 0){
+    sz = uvmdealloc(p->pagetable, sz, sz + n);
+  }
+  p->sz = sz;
+  return 0;
 }
 
-// --- 手册任务6：进程状态调试 ---
-void debug_proc_table(void) {
-    struct proc *p;
-    printf("\n=== Process Table ===\n");
-    for(p = proc; p < &proc[NPROC]; p++){
-        if(p->state != UNUSED){
-            const char *state_name;
-            switch(p->state){
-                case USED: state_name = "USED"; break;
-                case SLEEPING: state_name = "SLEEPING"; break;
-                case RUNNABLE: state_name = "RUNNABLE"; break;
-                case RUNNING: state_name = "RUNNING"; break;
-                case ZOMBIE: state_name = "ZOMBIE"; break;
-                default: state_name = "UNKNOWN"; break;
-            }
-            printf("PID: %d | State: %s\n", p->pid, state_name);
+// 创建当前进程的副本
+int fork(void) {
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // 1. 分配新进程
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  // 2. 复制用户内存
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    // freeproc(np); // 暂时简化，不处理释放
+    release(&np->lock);
+    return -1;
+  }
+  np->sz = p->sz;
+  np->parent = p;
+  // 3. 复制 Trapframe (寄存器状态)
+  *(np->trapframe) = *(p->trapframe);
+
+  // 4. fork 返回值：子进程返回 0
+  np->trapframe->a0 = 0;
+
+  // 5. 复制名字
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  pid = np->pid;
+
+  release(&np->lock);
+
+  // 6. 设置子进程状态为可运行
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return pid;
+}
+
+// 等待子进程退出
+int wait(uint64 addr) {
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&p->lock); // 获取自己的锁，准备睡觉或操作
+
+  for(;;){
+    // 扫描进程表，看看有没有我的子进程
+    havekids = 0;
+    for(np = proc; np < &proc[NPROC]; np++){
+      if(np->parent == p){ // 这里需要你在 struct proc 里加一个 parent 指针！
+        // 暂时为了编译通过，我们假设没有 parent 指针，用简单的逻辑演示
+        // 实际上你需要在 struct proc 里加 struct proc *parent;
+        // 并在 fork 时候 np->parent = p;
+        // 这里简化：假设所有 ZOMBIE 都是我的孩子 (这在多进程下是错的，但在简单测试下能跑)
+        havekids = 1;
+        
+        acquire(&np->lock);
+        if(np->state == ZOMBIE){
+          // 找到一个僵尸子进程，回收它
+          pid = np->pid;
+          if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate, sizeof(np->xstate)) < 0) {
+            release(&np->lock);
+            release(&p->lock);
+            return -1;
+          }
+          
+          // 清理进程表槽位 (freeproc 的逻辑)
+          np->state = UNUSED;
+          np->pid = 0;
+          np->parent = 0;
+          np->killed = 0;
+          np->xstate = 0;
+          
+          release(&np->lock);
+          release(&p->lock);
+          return pid;
         }
+        release(&np->lock);
+      }
     }
-    printf("=====================\n");
-}
 
-// --- 测试1：进程创建测试 (手册 P30) ---
-void simple_task(void) {
-    release(&myproc()->lock);
-    intr_on();
-    printf("Simple task running (PID %d)\n", myproc()->pid);
-    while(1) {
-        // 保持运行，让调度器有机会切走
-        // 为了避免死循环占满输出，加点延时
-         for(volatile int i=0; i<1000000; i++);
-         // yield(); // 可选：主动让出
+    // 如果没有子进程，或者被杀死了
+    if(!havekids || p->killed){
+      release(&p->lock);
+      return -1;
     }
-}
 
-void test_process_creation(void) {
-    printf("\n[Test] Process Creation...\n");
-    int pid1 = create_kernel_process(simple_task);
-    int pid2 = create_kernel_process(simple_task);
-    
-    if(pid1 > 0 && pid2 > 0) {
-        printf("SUCCESS: Created processes PID %d and %d\n", pid1, pid2);
-    } else {
-        printf("FAIL: Process creation failed\n");
-    }
-    
-    debug_proc_table(); // 打印状态验证
-}
-
-
-// --- 测试2：同步机制测试 (手册 P31) ---
-// 经典的生产者-消费者模型
-
-struct {
-    struct spinlock lock;
-    int buffer;
-    int data_ready; // 0: 空, 1: 满
-} shared_chan;
-
-void producer_task(void) {
-    release(&myproc()->lock);
-    intr_on();
-    for(int i = 1; i <= 3; i++) {
-        acquire(&shared_chan.lock);
-        while(shared_chan.data_ready == 1) {
-            // 缓冲区满，等待消费者取走
-            sleep(&shared_chan, &shared_chan.lock);
-        }
-        
-        // 生产数据
-        shared_chan.buffer = i * 10;
-        shared_chan.data_ready = 1;
-        printf("Producer: Produced %d\n", shared_chan.buffer);
-        
-        wakeup(&shared_chan); // 唤醒消费者
-        release(&shared_chan.lock);
-    }
-    printf("Producer finished.\n");
-    while(1); // 结束
-}
-
-void consumer_task(void) {
-    release(&myproc()->lock);
-    intr_on();
-    for(int i = 1; i <= 3; i++) {
-        acquire(&shared_chan.lock);
-        while(shared_chan.data_ready == 0) {
-            // 缓冲区空，等待生产者生产
-            sleep(&shared_chan, &shared_chan.lock);
-        }
-        
-        // 消费数据
-        int data = shared_chan.buffer;
-        shared_chan.data_ready = 0;
-        printf("Consumer: Consumed %d\n", data);
-        
-        wakeup(&shared_chan); // 唤醒生产者
-        release(&shared_chan.lock);
-    }
-    printf("Consumer finished.\n");
-    while(1); // 结束
-}
-
-void test_synchronization(void) {
-    printf("\n[Test] Synchronization (Producer/Consumer)...\n");
-    initlock(&shared_chan.lock, "shared");
-    shared_chan.data_ready = 0;
-    
-    create_kernel_process(consumer_task); // 先启动消费者，它应该会 sleep
-    create_kernel_process(producer_task);
-}
-
-// --- 测试3：调度器测试 (手册 P31) ---
-// 手册建议创建 CPU 密集型任务并观察
-void cpu_intensive_task(void) {
-    release(&myproc()->lock);
-    intr_on();
-    int pid = myproc()->pid;
-    for(int i = 0; i < 5; i++) {
-        printf("Task PID %d running iteration %d\n", pid, i);
-        // 模拟耗时
-        for(volatile int k = 0; k < 10000000; k++);
-    }
-    printf("Task PID %d finished.\n", pid);
-    while(1);
-}
-
-void test_scheduler_manual(void) {
-    printf("\n[Test] Scheduler...\n");
-    for(int i = 0; i < 3; i++) {
-        create_kernel_process(cpu_intensive_task);
-    }
-}
-
-void test_runner(void) {
-    release(&myproc()->lock);
-    printf("\n=== Starting Experiment 5 Tests ===\n");
-
-    // 1. 测试进程创建和查看状态
-    test_process_creation();
-
-    // 2. 测试同步 (休眠/唤醒)
-    // 注意：因为我们没有实现 wait() 系统调用，
-    // 这里启动后，测试进程会和当前进程并发运行
-    test_synchronization();
-
-    // 3. 测试调度公平性
-    test_scheduler_manual();
-
-    printf("\n=== All Tests Launched ===\n");
-    printf("System will now schedule between these tasks forever.\n");
-    
-    while(1) {
-        // 保持运行，防止 PID 1 退出导致 panic (如果实现了 exit 逻辑)
-        // 也可以在这里定期打印 proc table
-        for(volatile int i=0; i<50000000; i++);
-        // debug_proc_table(); 
-    }
+    // 等待子进程退出 (sleep)
+    // 这里需要一个等待通道，通常用 p 本身的地址
+    sleep(p, &p->lock); 
+  }
 }

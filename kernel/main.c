@@ -9,17 +9,20 @@
 extern char end[]; // 从链接器脚本获取
 
 void main(void) {
-    w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
+    //w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
     // 初始化控制台
     consoleinit();
     printf("booting helloos...\n");
     
     // 初始化物理内存分配器
     kinit((void*)end, (void*)PHYSTOP);
+    kvminit();
+    kvminithart();
     procinit();      // <--- 新增：初始化进程表
     
     plicinit();      // 中断控制器
     plicinithart();
+    trapinit();
     trapinithart();  // 陷阱/异常初始化
     
     printf("kernel init done, starting processes...\n");
