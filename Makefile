@@ -28,7 +28,9 @@ OBJS := \
 	$(K)/kernelvec.o \
     $(K)/proc.o   \
     $(K)/swtch.o  \
-	$(K)/spinlock.o
+	$(K)/spinlock.o \
+	$(K)/trampoline.o \
+    $(K)/syscall.o
 
 OBJS_ALL = $(OBJS)        # 手动列清单
 
