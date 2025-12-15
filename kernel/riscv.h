@@ -9,6 +9,13 @@
 #define PGSIZE 4096UL
 #define PGSHIFT 12UL
 
+#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
+// 向下取整到页边界
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+
+// 提取 PTE 中的标志位 (低 10 位)
+#define PTE_FLAGS(pte) ((pte) & 0x3FF)
+
 typedef uint64_t pte_t;
 typedef pte_t *pagetable_t;
 

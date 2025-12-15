@@ -7,6 +7,7 @@
 #include "kmem.h"
 
 extern char end[]; // 从链接器脚本获取
+extern struct superblock sb;
 
 void main(void) {
     //w_sie(r_sie() | SIE_SEIE | SIE_STIE | SIE_SSIE);
@@ -22,6 +23,15 @@ void main(void) {
     
     plicinit();      // 中断控制器
     plicinithart();
+    binit();         // 1. 初始化 Buffer Cache
+    iinit();         // 2. 初始化 Inode 表
+    fileinit();      // 3. 初始化文件表
+    virtio_disk_init(); // 4. 初始化磁盘驱动
+    printf("[5.4] virtio_disk_init done\n"); 
+    fsinit(ROOTDEV); 
+    printf("[5.5] fsinit done\n");
+    initlog(ROOTDEV, &sb);
+    printf("[5.6] initlog done\n");
     trapinit();
     trapinithart();  // 陷阱/异常初始化
     

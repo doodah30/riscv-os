@@ -6,6 +6,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h" // 确保包含这个
+#include "fcntl.h"
 
 uchar initcode[] = {
     0x93, 0x08, 0x00, 0x01, // li a7, 16
@@ -22,7 +26,6 @@ struct cpu cpus[NCPU];
 struct proc proc[NPROC];
 
 struct proc *initproc;
-void test_runner(void);
 int nextpid = 1;
 struct spinlock pid_lock;
 
@@ -203,10 +206,8 @@ void sleep(void *chan, struct spinlock *lk) {
     struct proc *p = myproc();
     
     // 必须持有 p->lock 才能修改 p->state
-    if(lk != &p->lock){
-        acquire(&p->lock);
-        release(lk);
-    }
+    acquire(&p->lock);
+    release(lk);
 
     p->chan = chan;
     p->state = SLEEPING;
@@ -215,10 +216,8 @@ void sleep(void *chan, struct spinlock *lk) {
 
     // 醒来后
     p->chan = 0;
-    if(lk != &p->lock){
-        release(&p->lock);
-        acquire(lk);
-    }
+    release(&p->lock);
+    acquire(lk);
 }
 
 // 唤醒
@@ -238,34 +237,37 @@ void wakeup(void *chan) {
 
 void userinit(void) {
   struct proc *p;
-
   p = allocproc();
   initproc = p;
   
-  // 1. 创建页表 (此时里面已经有了 Trampoline)
   p->pagetable = uvmcreate();
   if(p->pagetable == 0) panic("userinit: uvmcreate");
-
-  // 2. 映射 initcode
   uvmfirst(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
-  // 3. === 关键修复：映射 Trapframe ===
-  // 将内核分配的 p->trapframe (物理地址/内核虚地址) 
-  // 映射到用户空间的固定高地址 TRAPFRAME
-  if(mappages(p->pagetable, TRAPFRAME, PGSIZE, 
-              (uint64)(p->trapframe), PTE_R | PTE_W) < 0) {
+  
+  // 映射 trapframe
+  if(mappages(p->pagetable, TRAPFRAME, PGSIZE, (uint64)(p->trapframe), PTE_R | PTE_W) < 0)
       panic("userinit: map trapframe");
-  }
 
-  // 4. 设置上下文
-  p->trapframe->epc = 0;      // 用户程序入口
-  p->trapframe->sp = PGSIZE;  // 用户栈顶
-
+  p->trapframe->epc = 0;      
+  p->trapframe->sp = PGSIZE;  
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->state = RUNNABLE;
 
-  // 此时不需要 release(&p->lock)，因为 allocproc 已经释放了
+  // === 【新增】手动预置文件描述符，让 printf 能工作 ===
+  // 我们手动分配一个文件结构，让它指向 CONSOLE 设备
+  struct file *f = filealloc();
+  if(f) {
+      f->type = FD_DEVICE;
+      f->major = CONSOLE;
+      f->readable = 1;
+      f->writable = 1;
+      
+      // 让 fd 1 (标准输出) 指向这个文件
+      p->ofile[1] = f;
+      // 增加引用计数（filealloc 初始为 1，这里被 ofile[1] 持有）
+  }
+  // ===============================================
 }
 
 void exit(int status) {
@@ -313,7 +315,7 @@ int growproc(int n) {
 
 // 创建当前进程的副本
 int fork(void) {
-  int i, pid;
+  int pid;
   struct proc *np;
   struct proc *p = myproc();
 
@@ -404,5 +406,40 @@ int wait(uint64 addr) {
     // 等待子进程退出 (sleep)
     // 这里需要一个等待通道，通常用 p 本身的地址
     sleep(p, &p->lock); 
+  }
+}
+
+int
+killed(struct proc *p)
+{
+  int k;
+  
+  acquire(&p->lock);
+  k = p->killed;
+  release(&p->lock);
+  return k;
+}
+
+int
+either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
+{
+  struct proc *p = myproc();
+  if(user_dst){
+    return copyout(p->pagetable, dst, src, len);
+  } else {
+    memmove((char *)dst, src, len);
+    return 0;
+  }
+}
+
+int
+either_copyin(void *dst, int user_src, uint64 src, uint64 len)
+{
+  struct proc *p = myproc();
+  if(user_src){
+    return copyin(p->pagetable, dst, src, len);
+  } else {
+    memmove(dst, (char*)src, len);
+    return 0;
   }
 }

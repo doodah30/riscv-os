@@ -7,11 +7,25 @@
 #include "syscall.h"
 #include "defs.h"
 
+extern uint64 sys_exit(void);
 extern uint64 sys_fork(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_sbrk(void);
 extern uint64 sys_sleep(void);
 extern uint64 sys_getpid(void);
+
+extern uint64 sys_write(void); 
+extern uint64 sys_read(void);
+extern uint64 sys_fstat(void);
+extern uint64 sys_open(void);
+extern uint64 sys_mknod(void);
+//extern uint64 sys_unlink(void);
+//extern uint64 sys_link(void);
+extern uint64 sys_mkdir(void);
+extern uint64 sys_close(void);
+extern uint64 sys_chdir(void);
+extern uint64 sys_dup(void);
+//extern uint64 sys_exec(void);
 
 // 获取第 n 个整数参数
 int argint(int n, int *ip) {
@@ -46,55 +60,46 @@ int argaddr(int n, uint64 *ip) {
   return 0;
 }
 
-// --- 具体的系统调用实现 ---
-
-// sys_write(fd, buf, n)
-uint64 sys_write(void) {
-  int fd;
-  uint64 p;
-  int n;
-
-  if(argint(0, &fd) < 0 || argaddr(1, &p) < 0 || argint(2, &n) < 0)
+int
+fetchstr(uint64 addr, char *buf, int max)
+{
+  struct proc *p = myproc();
+  if(copyinstr(p->pagetable, buf, addr, max) < 0)
     return -1;
-  
-  // 暂时只支持向标准输出(1)写，忽略 fd
-  // 并且为了简单，假设 p 是可以直接访问的（实际上应该用 copyin）
-  // 这里我们偷懒：因为我们还没有实现 copyin，
-  // 我们暂时假定用户传的是物理地址或者我们通过 copyin 读取
-  // **注意**：标准实现应该用 copyin 从用户页表读取数据
-  // 简化测试：直接把 p 当作物理地址打印（Hack）
-  // 为了通过测试，我们稍后在 userinit 里做点手脚，或者在这里通过 walk 查找物理地址
-  
-  // 正规做法：
-  // char buf[128];
-  // copyin(p->pagetable, buf, p, n);
-  
-  printf("sys_write called: fd=%d, len=%d\n", fd, n);
-  return n;
+  return strlen(buf);
 }
 
-uint64 sys_exit(void) {
-  int n;
-  // 获取用户传递的退出状态码 (initcode里传的是0)
-  if(argint(0, &n) < 0)
-    return -1;
-  
-  // 调用 proc.c 中的 exit 函数
-  // 这会打印 "PID 1 exited..." 然后 panic
-  exit(n);
-  
-  return 0;  // 永远不会执行到这里
+int
+argstr(int n, char *buf, int max)
+{
+  uint64 addr;
+  argaddr(n, &addr);
+  return fetchstr(addr, buf, max);
 }
 
 // 系统调用表
 static uint64 (*syscalls[])(void) = {
-[SYS_write]   sys_write,
-[SYS_exit]    sys_exit,
 [SYS_fork]    sys_fork,
+[SYS_exit]    sys_exit,
 [SYS_wait]    sys_wait,
+//[SYS_pipe]    sys_pipe,    // 假设你有 pipe
+[SYS_read]    sys_read,
+//[SYS_kill]    sys_kill,    // 假设你有 kill
+//[SYS_exec]    sys_exec,    // 假设你有 exec
+[SYS_fstat]   sys_fstat,
+[SYS_chdir]   sys_chdir,
+[SYS_dup]     sys_dup,
+[SYS_getpid]  sys_getpid,
 [SYS_sbrk]    sys_sbrk,
 [SYS_sleep]   sys_sleep,
-[SYS_getpid]  sys_getpid,
+//[SYS_uptime]  sys_uptime,  // 假设你有 uptime
+[SYS_open]    sys_open,
+[SYS_write]   sys_write,
+[SYS_mknod]   sys_mknod,
+//[SYS_unlink]  sys_unlink,
+//[SYS_link]    sys_link,
+[SYS_mkdir]   sys_mkdir,
+[SYS_close]   sys_close,
 };
 
 void syscall(void) {

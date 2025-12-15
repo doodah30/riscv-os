@@ -102,6 +102,8 @@ struct proc {
     pagetable_t pagetable;       // 用户页表
     struct trapframe *trapframe; // 蹦床页的数据 (中断帧)
     struct context context;      // 进程切换上下文
+    struct file *ofile[NOFILE];  // Open files
+    struct inode *cwd;
     struct proc *parent;         // 父进程
     char name[16];               // 进程名 (调试用)
 };

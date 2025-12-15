@@ -12,9 +12,15 @@ struct proc;
 struct spinlock;  // <--- 重点：必须添加这一行！
 struct stat;
 struct superblock;
+struct sleeplock;
 
 // bio.c
-
+void            binit(void);
+struct buf*     bread(uint, uint);
+void            brelse(struct buf*);
+void            bwrite(struct buf*);
+void            bpin(struct buf*);
+void            bunpin(struct buf*);
 
 // console.c
 void            consoleinit(void);
@@ -25,17 +31,46 @@ void            clear_line(void);
 // exec.c
 
 // file.c
-
+struct file*    filealloc(void);
+void            fileclose(struct file*);
+struct file*    filedup(struct file*);
+void            fileinit(void);
+int             fileread(struct file*, uint64, int n);
+int             filestat(struct file*, uint64 addr);
+int             filewrite(struct file*, uint64, int n);
 // fs.c
-
+void            fsinit(int);
+int             dirlink(struct inode*, char*, uint);
+struct inode*   dirlookup(struct inode*, char*, uint*);
+struct inode*   ialloc(uint, short);
+struct inode*   idup(struct inode*);
+void            iinit(void);
+void            ilock(struct inode*);
+void            iput(struct inode*);
+void            iunlock(struct inode*);
+void            iunlockput(struct inode*);
+void            iupdate(struct inode*);
+int             namecmp(const char*, const char*);
+struct inode*   namei(char*);
+struct inode*   nameiparent(char*, char*);
+int             readi(struct inode*, int, uint64, uint, uint);
+void            stati(struct inode*, struct stat*);
+int             writei(struct inode*, int, uint64, uint, uint);
+void            itrunc(struct inode*);
 // kalloc.c
 void kinit(void *start, void *endpa); // start/end are kernel-accessible addresses (VA)
 void *kalloc(void);                    // return a kernel-accessible page (VA) or NULL
 void kfree(void *pa);
 // log.c
-
+void            initlog(int, struct superblock*);
+void            log_write(struct buf*);
+void            begin_op(void);
+void            end_op(void);
 // pipe.c
-
+int             pipealloc(struct file**, struct file**);
+void            pipeclose(struct pipe*, int);
+int             piperead(struct pipe*, uint64, int);
+int             pipewrite(struct pipe*, uint64, int);
 // printf.c
 void            printf(const char *fmt, ...);
 void            printf_color(int color, const char *fmt, ...);
@@ -60,6 +95,7 @@ int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 struct proc*    myproc(void);
 struct cpu*     mycpu(void);
+int             killed(struct proc*);
 // swtch.S
 void            swtch(struct context*, struct context*);
 // spinlock.c
@@ -70,7 +106,10 @@ int             holding(struct spinlock*);
 void            push_off(void);
 void            pop_off(void);
 // sleeplock.c
-
+void            acquiresleep(struct sleeplock*);
+void            releasesleep(struct sleeplock*);
+int             holdingsleep(struct sleeplock*);
+void            initsleeplock(struct sleeplock*, char*);
 // string.c
 int             memcmp(const void*, const void*, uint);
 void*           memmove(void*, const void*, uint);
@@ -81,9 +120,12 @@ int             strncmp(const char*, const char*, uint);
 char*           strncpy(char*, const char*, int);
 void*           memcpy(void *dest, const void *src, size_t n);
 // syscall.c
-void            syscall(void);  // <--- 添加这一行
 int             argint(int, int*);
-int             argaddr(int, uint64*);
+int             argstr(int, char*, int);
+int             argaddr(int, uint64 *);
+int             fetchstr(uint64, char*, int);
+int             fetchaddr(uint64, uint64*);
+void            syscall();
 // trap.c
 void            trapinithart(void);
 void            usertrapret(void);
@@ -93,8 +135,9 @@ void            trapinit(void);
 // uart.c
 void            uartinit(void);
 void            uartputs(const char *s);
-void            uartputc(int);
+void            uartputc(char);
 void            uartintr(void);
+void            uartwrite(char [], int);
 
 // vm.c
 pagetable_t     uvmcreate(void);
@@ -107,12 +150,15 @@ int             mappages(pagetable_t pagetable, uint64_t va, uint64_t size, uint
 uint64          uvmalloc(pagetable_t, uint64, uint64);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
+int             copyinstr(pagetable_t, char *, uint64, uint64);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
 int             plic_claim(void);
 void            plic_complete(int);
 // virtio_disk.c
+void            virtio_disk_init(void);
+void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
 
 #endif // DEFS_H

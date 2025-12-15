@@ -97,36 +97,6 @@ uint64_t walkaddr(pagetable_t pagetable, uint64_t va) {
     return pte_to_pa(*pte) | (va & (PGSIZE - 1));
 }
 
-// uvmalloc: allocate pages to grow from oldsz to newsz (both bytes)
-int uvmalloc(pagetable_t pagetable, uint64_t oldsz, uint64_t newsz) {
-    if (newsz < oldsz) return -1;
-    uint64_t a = (oldsz + PGSIZE - 1) & ~(PGSIZE - 1);
-    for (; a + PGSIZE <= newsz; a += PGSIZE) {
-        void *mem = kalloc();
-        if (!mem) {
-            // allocation failure: rollback previously allocated pages
-            unmap_pages(pagetable, (oldsz + PGSIZE - 1) & ~(PGSIZE - 1), a - ((oldsz + PGSIZE - 1) & ~(PGSIZE - 1)));
-            return -1;
-        }
-        uint64_t pa = VA2PA(mem);
-        if (mappages(pagetable, a, PGSIZE, pa, PTE_R | PTE_W | PTE_U) != 0) {
-            kfree(mem);
-            unmap_pages(pagetable, (oldsz + PGSIZE - 1) & ~(PGSIZE - 1), a - ((oldsz + PGSIZE - 1) & ~(PGSIZE - 1)));
-            return -1;
-        }
-    }
-    return 0;
-}
-
-void uvmdealloc(pagetable_t pagetable, uint64_t oldsz, uint64_t newsz) {
-    if (newsz >= oldsz) return;
-    uint64_t a = ((newsz + PGSIZE - 1) & ~(PGSIZE - 1));
-    for (; a + PGSIZE <= oldsz; a += PGSIZE) {
-        // unmap_pages will free the physical page
-        unmap_pages(pagetable, a, PGSIZE);
-    }
-}
-
 // helper to walk pagetable recursively and free page-table pages and leaf pages
 static void free_pagetable_recursive(pagetable_t p, int level) {
     if (!p) return;
@@ -309,10 +279,6 @@ void kvminithart(void) {
     asm volatile("sfence.vma" ::: "memory");
 }
 
-#ifndef PGROUNDDOWN
-#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
-#endif
-
 // 1. 创建一个空的用户页表
 // 实际上就是调用你现有的 proc_pagetable_create
 pagetable_t uvmcreate() {
@@ -414,7 +380,6 @@ uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
   if(newsz >= oldsz) return oldsz;
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
-    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     // unmap_pages 是你之前写过的，这里简化调用，确保你 vm.c 里有这个逻辑
     // 或者我们手动释放
     for(uint64 a = PGROUNDUP(newsz); a < PGROUNDUP(oldsz); a += PGSIZE){
@@ -484,4 +449,43 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
   // 发生错误，释放新分配的页面
   // unmap_pages(new, 0, i, 1); // 假设你有这个清理函数
   return -1;
+}
+
+int
+copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
+{
+  uint64 n, va0, pa0;
+  int got_null = 0;
+
+  while(got_null == 0 && max > 0){
+    va0 = PGROUNDDOWN(srcva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (srcva - va0);
+    if(n > max)
+      n = max;
+
+    char *p = (char *) (pa0 + (srcva - va0));
+    while(n > 0){
+      if(*p == '\0'){
+        *dst = '\0';
+        got_null = 1;
+        break;
+      } else {
+        *dst = *p;
+      }
+      --n;
+      --max;
+      p++;
+      dst++;
+    }
+
+    srcva = va0 + PGSIZE;
+  }
+  if(got_null){
+    return 0;
+  } else {
+    return -1;
+  }
 }

@@ -17,11 +17,12 @@ int mappages(pagetable_t pagetable, uint64_t va, uint64_t size, uint64_t pa, int
 void unmap_pages(pagetable_t pagetable, uint64_t va, uint64_t size); // unmap and free physical pages
 uint64_t walkaddr(pagetable_t pagetable, uint64_t va); // get PA mapped by va (or 0)
 
-int uvmalloc(pagetable_t pagetable, uint64_t oldsz, uint64_t newsz);
-void uvmdealloc(pagetable_t pagetable, uint64_t oldsz, uint64_t newsz);
+uint64 uvmalloc(pagetable_t, uint64, uint64);
+uint64 uvmdealloc(pagetable_t, uint64, uint64);
 pagetable_t copyuvm(pagetable_t old, uint64_t sz);
 void freevm(pagetable_t pagetable, uint64_t sz);
 void print_pagetable(pagetable_t root);
 void kvminit(void);
 void kvminithart(void);
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz);
 #endif // VM_H

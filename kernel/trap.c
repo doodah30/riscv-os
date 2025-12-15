@@ -270,11 +270,6 @@ void usertrapret(void) {
   
   // 检查物理地址是否对齐
   uint64 pa = pte_to_pa(*pte);
-  
-  if(pa != 0x80004000) { // 这里填你之前 nm 看到的地址
-      printf("WARNING: PA mismatch! Expected 0x80004000\n");
-  }
-  // ===================================
 
   // 7. 计算跳转目标
   uint64 fn = TRAMPOLINE + (uint64)userret - (uint64)trampoline;

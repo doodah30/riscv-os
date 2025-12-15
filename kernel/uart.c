@@ -1,5 +1,11 @@
 #include <stdint.h>
+#include "types.h"
+#include "param.h"
 #include "memlayout.h"
+#include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "defs.h"
 
 #define Reg(reg) ((volatile unsigned char *)(UART0 + reg))
 
@@ -21,6 +27,10 @@
 
 #define ReadReg(reg) (*(Reg(reg)))
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
+
+static struct spinlock tx_lock;
+static int tx_busy;           // is the UART busy sending?
+static int tx_chan;           // &tx_chan is the "wait channel"
 
 void
 uartinit(void)
@@ -49,6 +59,27 @@ void uartputc(char c) {
     ;
     /* 对于 QEMU virt 的简单实验，直接写数据寄存器通常就能输出 */
     WriteReg(THR,c);
+}
+
+void
+uartwrite(char buf[], int n)
+{
+  acquire(&tx_lock);
+
+  int i = 0;
+  while(i < n){ 
+    while(tx_busy != 0){
+      // wait for a UART transmit-complete interrupt
+      // to set tx_busy to 0.
+      sleep(&tx_chan, &tx_lock);
+    }   
+      
+    WriteReg(THR, buf[i]);
+    i += 1;
+    tx_busy = 1;
+  }
+
+  release(&tx_lock);
 }
 
 /* 字符串输出 */
