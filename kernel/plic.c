@@ -19,7 +19,7 @@ plicinithart(void)
 {
   // 我们的内核目前是单核运行，所以 hart id 总是 0.
   // 我们将 cpuid() 调用替换为硬编码的 0.
-  int hart = 0; 
+  int hart = cpuid();
   
   // 为这个核心的 Supervisor mode 开启 UART 和 virtio 磁盘中断
   *(uint32*)PLIC_SENABLE(hart) = (1 << UART0_IRQ) | (1 << VIRTIO0_IRQ);
@@ -33,7 +33,7 @@ plicinithart(void)
 int
 plic_claim(void)
 {
-  int hart = 0;
+  int hart = cpuid();
   int irq = *(uint32*)PLIC_SCLAIM(hart);
   return irq;
 }
@@ -42,6 +42,6 @@ plic_claim(void)
 void
 plic_complete(int irq)
 {
-  int hart = 0;
+  int hart = cpuid();
   *(uint32*)PLIC_SCLAIM(hart) = irq;
 }

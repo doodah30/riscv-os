@@ -61,8 +61,21 @@ void kerneltrap() {
         // 是中断，调用 devintr 并获取返回值
         which_dev = devintr();
     } else {
-        // 是异常
-        handle_exception();
+        // === 【关键修复】直接在这里处理内核异常 ===
+        uint64 stval = r_stval();
+        printf("--- Kernel Exception ---\n");
+        printf("scause %p\n", scause);
+        printf("sepc=%p stval=%p\n", sepc, stval);
+        
+        switch(scause) {
+            case 13: // Load Page Fault
+            case 15: // Store Page Fault
+                panic("Kernel Page Fault");
+                break;
+            default:
+                panic("Unhandled Kernel Exception");
+                break;
+        }
     }
 
     // --- 核心调度逻辑 ---
@@ -118,7 +131,7 @@ void handle_exception() {
             break;
         
         default:
-            printf("  Type: Unhandled Exception\n");
+            printf("Type: Unhandled Exception\n");
             panic("Unhandled exception");
             break;
     }

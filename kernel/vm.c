@@ -87,16 +87,6 @@ void unmap_pages(pagetable_t pagetable, uint64_t va, uint64_t size) {
     sfence_vma();
 }
 
-// walkaddr: return physical address for va (or 0 if not mapped)
-uint64_t walkaddr(pagetable_t pagetable, uint64_t va) {
-    pte_t *pte = walk(pagetable, va, 0);
-    if (!pte) return 0;
-    if (!(*pte & PTE_V)) return 0;
-    // must be leaf (R/W/X bits indicate leaf)
-    if (!((*pte & PTE_R) || (*pte & PTE_X) || (*pte & PTE_W))) return 0;
-    return pte_to_pa(*pte) | (va & (PGSIZE - 1));
-}
-
 // helper to walk pagetable recursively and free page-table pages and leaf pages
 static void free_pagetable_recursive(pagetable_t p, int level) {
     if (!p) return;
@@ -395,21 +385,24 @@ uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
 }
 
 // 对应 uvmalloc (增长内存)
-uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) {
+uint64
+uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
+{
   char *mem;
   uint64 a;
 
-  if(newsz < oldsz) return oldsz;
+  if(newsz < oldsz)
+    return oldsz;
 
-  a = PGROUNDUP(oldsz);
-  for(; a < newsz; a += PGSIZE){
+  oldsz = PGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
     memset(mem, 0, PGSIZE);
-    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) < 0){
+    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
@@ -488,4 +481,82 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+void
+uvmclear(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    panic("uvmclear");
+  *pte &= ~PTE_U;
+}
+
+uint64
+walkaddr(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_V) == 0)
+    return 0;
+  if((*pte & PTE_U) == 0)
+    return 0;
+  pa = pte_to_pa(*pte);
+  return pa;
+}
+
+void
+uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+{
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
+      continue;   
+    if((*pte & PTE_V) == 0)  // has physical page been allocated?
+      continue;
+    if(do_free){
+      uint64 pa = pte_to_pa(*pte);
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+}
+
+void
+freewalk(pagetable_t pagetable)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = pte_to_pa(pte);
+      freewalk((pagetable_t)child);
+      pagetable[i] = 0;
+    } else if(pte & PTE_V){
+      panic("freewalk: leaf");
+    }
+  }
+  kfree((void*)pagetable);
+}
+
+void
+uvmfree(pagetable_t pagetable, uint64 sz)
+{
+  if(sz > 0)
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+  freewalk(pagetable);
 }

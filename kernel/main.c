@@ -23,18 +23,13 @@ void main(void) {
     
     plicinit();      // 中断控制器
     plicinithart();
+    trapinithart();  // 陷阱/异常初始化
     binit();         // 1. 初始化 Buffer Cache
     iinit();         // 2. 初始化 Inode 表
     fileinit();      // 3. 初始化文件表
     virtio_disk_init(); // 4. 初始化磁盘驱动
-    printf("[5.4] virtio_disk_init done\n"); 
     fsinit(ROOTDEV); 
-    printf("[5.5] fsinit done\n");
-    initlog(ROOTDEV, &sb);
-    printf("[5.6] initlog done\n");
-    trapinit();
-    trapinithart();  // 陷阱/异常初始化
-    
+   
     printf("kernel init done, starting processes...\n");
 
     // 2. 创建测试进程

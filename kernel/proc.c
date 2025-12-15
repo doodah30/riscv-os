@@ -30,6 +30,7 @@ int nextpid = 1;
 struct spinlock pid_lock;
 
 extern void forkret(void); // 在 trap.c 或 kernelvec.S 中定义，或者是新建的
+extern char trampoline[];
 
 void forkret(void) {
   static int first = 1;
@@ -204,6 +205,22 @@ void sched(void) {
 // 休眠
 void sleep(void *chan, struct spinlock *lk) {
     struct proc *p = myproc();
+    if(p == 0) {
+    // === 【关键修复】===
+    // 内核启动阶段，没有进程，不能调度。
+    // 我们只能释放锁，然后自旋等待中断。
+    release(lk);
+    
+    // 等待中断发生 (wfi: wait for interrupt)
+    // 必须先开启中断，否则会死锁
+    intr_on();
+    asm volatile("wfi");
+    intr_off();
+    
+    acquire(lk);
+    return;
+    // =================
+    }
     
     // 必须持有 p->lock 才能修改 p->state
     acquire(&p->lock);
@@ -303,7 +320,7 @@ int growproc(int n) {
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
       return -1;
     }
   } else if(n < 0){
@@ -442,4 +459,43 @@ either_copyin(void *dst, int user_src, uint64 src, uint64 len)
     memmove(dst, (char*)src, len);
     return 0;
   }
+}
+
+pagetable_t
+proc_pagetable(struct proc *p)
+{
+  pagetable_t pagetable;
+
+  // An empty page table.
+  pagetable = uvmcreate();
+  if(pagetable == 0)
+    return 0;
+
+  // map the trampoline code (for system call return)
+  // at the highest user virtual address.
+  // only the supervisor uses it, on the way
+  // to/from user space, so not PTE_U.
+  if(mappages(pagetable, TRAMPOLINE, PGSIZE,
+              (uint64)trampoline, PTE_R | PTE_X) < 0){
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
+  // map the trapframe page just below the trampoline page, for
+  // trampoline.S.
+  if(mappages(pagetable, TRAPFRAME, PGSIZE,
+              (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
+
+  return pagetable;
+}
+void
+proc_freepagetable(pagetable_t pagetable, uint64 sz)
+{
+  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmfree(pagetable, sz);
 }

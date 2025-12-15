@@ -273,3 +273,51 @@ uint64 sys_chdir(void) {
   p->cwd = ip;
   return 0;
 }
+
+extern int exec(char *path, char **argv);
+
+uint64 sys_exec(void) {
+  char path[MAXPATH], *argv[MAXARG];
+  int i;
+  uint64 uargv, uarg;
+
+  // 获取路径
+  if(argstr(0, path, MAXPATH) < 0 || argaddr(1, &uargv) < 0){
+    return -1;
+  }
+  
+  memset(argv, 0, sizeof(argv));
+  for(i=0; ; i++){
+    if(i >= NELEM(argv))
+      goto bad;
+    
+    // 获取 argv[i] 的地址
+    if(fetchaddr(uargv+sizeof(uint64)*i, &uarg) < 0)
+      goto bad;
+    if(uarg == 0){
+      argv[i] = 0;
+      break;
+    }
+    
+    // 分配内核内存暂存参数
+    argv[i] = kalloc();
+    if(argv[i] == 0)
+      goto bad;
+    
+    // 从用户空间拷贝参数字符串
+    if(fetchstr(uarg, argv[i], PGSIZE) < 0)
+      goto bad;
+  }
+
+  int ret = exec(path, argv);
+
+  for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
+    kfree(argv[i]);
+
+  return ret;
+
+ bad:
+  for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
+    kfree(argv[i]);
+  return -1;
+}

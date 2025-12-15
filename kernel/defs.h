@@ -29,7 +29,7 @@ void            consputc(int);
 void            goto_xy(int x, int y);
 void            clear_line(void);
 // exec.c
-
+int             exec(char*, char**);
 // file.c
 struct file*    filealloc(void);
 void            fileclose(struct file*);
@@ -82,6 +82,7 @@ int             fork(void);
 int             growproc(int);
 void            proc_mapstacks(pagetable_t);
 pagetable_t     proc_pagetable(struct proc *);
+void            proc_freepagetable(pagetable_t, uint64);
 void            procinit(void);
 void            scheduler(void) __attribute__((noreturn));
 void            sched(void);
@@ -147,10 +148,16 @@ int             copyout(pagetable_t, uint64, char*, uint64);
 void            kvminit(void);
 void            kvminithart(void);
 int             mappages(pagetable_t pagetable, uint64_t va, uint64_t size, uint64_t pa, int perm);
-uint64          uvmalloc(pagetable_t, uint64, uint64);
+uint64          uvmalloc(pagetable_t, uint64, uint64, int xperm);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            uvmfree(pagetable_t, uint64);
+void            uvmunmap(pagetable_t, uint64, uint64, int);
+void
+uvmclear(pagetable_t pagetable, uint64 va);
+uint64
+walkaddr(pagetable_t pagetable, uint64 va);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

@@ -25,7 +25,7 @@ extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_chdir(void);
 extern uint64 sys_dup(void);
-//extern uint64 sys_exec(void);
+extern uint64 sys_exec(void);
 
 // 获取第 n 个整数参数
 int argint(int n, int *ip) {
@@ -61,6 +61,17 @@ int argaddr(int n, uint64 *ip) {
 }
 
 int
+fetchaddr(uint64 addr, uint64 *ip)
+{
+  struct proc *p = myproc();
+  if(addr >= p->sz || addr+sizeof(uint64) > p->sz) // both tests needed, in case of overflow
+    return -1;
+  if(copyin(p->pagetable, (char *)ip, addr, sizeof(*ip)) != 0)
+    return -1;
+  return 0;
+}
+
+int
 fetchstr(uint64 addr, char *buf, int max)
 {
   struct proc *p = myproc();
@@ -85,7 +96,7 @@ static uint64 (*syscalls[])(void) = {
 //[SYS_pipe]    sys_pipe,    // 假设你有 pipe
 [SYS_read]    sys_read,
 //[SYS_kill]    sys_kill,    // 假设你有 kill
-//[SYS_exec]    sys_exec,    // 假设你有 exec
+[SYS_exec]    sys_exec,    // 假设你有 exec
 [SYS_fstat]   sys_fstat,
 [SYS_chdir]   sys_chdir,
 [SYS_dup]     sys_dup,
