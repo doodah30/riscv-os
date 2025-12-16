@@ -24,10 +24,8 @@ void            bunpin(struct buf*);
 
 // console.c
 void            consoleinit(void);
-void            clear(void);
+void            consoleintr(int);
 void            consputc(int);
-void            goto_xy(int x, int y);
-void            clear_line(void);
 // exec.c
 int             exec(char*, char**);
 // file.c
@@ -135,8 +133,7 @@ extern struct spinlock tickslock;
 void            trapinit(void);
 // uart.c
 void            uartinit(void);
-void            uartputs(const char *s);
-void            uartputc(char);
+void            uartputc(int);
 void            uartintr(void);
 void            uartwrite(char [], int);
 
@@ -158,6 +155,9 @@ void
 uvmclear(pagetable_t pagetable, uint64 va);
 uint64
 walkaddr(pagetable_t pagetable, uint64 va);
+void
+freewalk(pagetable_t pagetable);
+pte_t *walk(pagetable_t pagetable, uint64_t va, int alloc);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

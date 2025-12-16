@@ -34,27 +34,28 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
-
   begin_op();
-
   // Open the executable file.
   if((ip = namei(path)) == 0){
     end_op();
+    printf("exec: namei failed for path [%s]\n", path);
     return -1;
   }
   ilock(ip);
-
   // Read the ELF header.
-  if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
+  if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf)){
+    printf("exec: readi elf header failed\n");
     goto bad;
-
+  }
   // Is this really an ELF file?
-  if(elf.magic != ELF_MAGIC)
+  if(elf.magic != ELF_MAGIC){
+    printf("exec: bad elf magic 0x%x\n", elf.magic);
     goto bad;
-
-  if((pagetable = proc_pagetable(p)) == 0)
+  }
+  if((pagetable = proc_pagetable(p)) == 0){
+    printf("exec: uvmcreate failed\n");
     goto bad;
-
+  }
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
@@ -68,8 +69,10 @@ exec(char *path, char **argv)
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
     uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0)
+    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0){
+      printf("exec: uvmalloc failed\n"); // <--- 内存分配检查
       goto bad;
+    }
     sz = sz1;
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
@@ -80,7 +83,6 @@ exec(char *path, char **argv)
 
   p = myproc();
   uint64 oldsz = p->sz;
-
   // Allocate some pages at the next page boundary.
   // Make the first inaccessible as a stack guard.
   // Use the rest as the user stack.
@@ -133,6 +135,7 @@ exec(char *path, char **argv)
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
+  
   proc_freepagetable(oldpagetable, oldsz);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)

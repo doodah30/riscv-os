@@ -19,13 +19,14 @@ extern uint64 sys_read(void);
 extern uint64 sys_fstat(void);
 extern uint64 sys_open(void);
 extern uint64 sys_mknod(void);
-//extern uint64 sys_unlink(void);
+extern uint64 sys_unlink(void);
 //extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_chdir(void);
 extern uint64 sys_dup(void);
 extern uint64 sys_exec(void);
+extern uint64 sys_uptime(void);
 
 // 获取第 n 个整数参数
 int argint(int n, int *ip) {
@@ -103,11 +104,11 @@ static uint64 (*syscalls[])(void) = {
 [SYS_getpid]  sys_getpid,
 [SYS_sbrk]    sys_sbrk,
 [SYS_sleep]   sys_sleep,
-//[SYS_uptime]  sys_uptime,  // 假设你有 uptime
+[SYS_uptime]  sys_uptime,  // 假设你有 uptime
 [SYS_open]    sys_open,
 [SYS_write]   sys_write,
 [SYS_mknod]   sys_mknod,
-//[SYS_unlink]  sys_unlink,
+[SYS_unlink]  sys_unlink,
 //[SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,

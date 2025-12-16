@@ -25,53 +25,6 @@ void consputc(int c) {
   uartputc(c);
 }
 
-// 清屏（ANSI 转义序列）
-void clear(void) {
-  // \033[2J 清屏，\033[H 光标回到左上角, \033[3J真正的清屏
-  uartputs("\033[3J\033[2J\033[H");
-}
-
-// 一个小辅助函数，把整数转成字符串
-static int uart_printint_to_buf(char *dst, int num) {
-  char tmp[16];
-  int i = 0, j;
-  if (num == 0) {
-    dst[0] = '0';
-    return 1;
-  }
-  while (num > 0) {
-    tmp[i++] = '0' + (num % 10);
-    num /= 10;
-  }
-  for (j = 0; j < i; j++) {
-    dst[j] = tmp[i - j - 1];
-  }
-  return i;
-}
-
-void goto_xy(int x, int y) {
-  char buf[32];
-  int i = 0;
-
-  buf[i++] = '\033';
-  buf[i++] = '[';
-
-  // 输出 y
-  i += uart_printint_to_buf(&buf[i], y);
-  buf[i++] = ';';
-
-  // 输出 x
-  i += uart_printint_to_buf(&buf[i], x);
-  buf[i++] = 'H';
-
-  buf[i] = '\0';
-  uartputs(buf);
-}
-
-void clear_line() {
-  uartputs("\033[2K\r");
-}
-
 struct {
   struct spinlock lock;
 
@@ -155,4 +108,50 @@ consoleread(int user_dst, uint64 dst, int n)
   release(&cons.lock);
 
   return target - n;
+}
+
+void
+consoleintr(int c)
+{
+  acquire(&cons.lock);
+
+  switch(c){
+  case C('P'):  // Print process list.
+    procdump();
+    break;
+  case C('U'):  // Kill line.
+    while(cons.e != cons.w &&
+          cons.buf[(cons.e-1) % INPUT_BUF_SIZE] != '\n'){
+      cons.e--;
+      consputc(BACKSPACE);
+    }
+    break;
+  case C('H'): // Backspace
+  case '\x7f': // Delete key
+    if(cons.e != cons.w){
+      cons.e--;
+      consputc(BACKSPACE);
+    }
+    break;
+  default:
+    if(c != 0 && cons.e-cons.r < INPUT_BUF_SIZE){
+      c = (c == '\r') ? '\n' : c;
+
+      // echo back to the user.
+      consputc(c);
+
+      // store for consumption by consoleread().
+      cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
+
+      if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE){
+        // wake up consoleread() if a whole line (or end-of-file)
+        // has arrived.
+        cons.w = cons.e;
+        wakeup(&cons.r);
+      }
+    }
+    break;
+  }
+  
+  release(&cons.lock);
 }

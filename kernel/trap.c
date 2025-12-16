@@ -149,7 +149,7 @@ clockintr()
   release(&tickslock); // 释放锁
 
   // 设置下一次中断
-  w_stimecmp(r_time() + 100000); 
+  w_stimecmp(r_time() + 10000); 
 }
 
 // 检查是外部中断还是软件中断，并处理它
@@ -282,7 +282,6 @@ void usertrapret(void) {
   }
   
   // 检查物理地址是否对齐
-  uint64 pa = pte_to_pa(*pte);
 
   // 7. 计算跳转目标
   uint64 fn = TRAMPOLINE + (uint64)userret - (uint64)trampoline;

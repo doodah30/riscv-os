@@ -87,28 +87,16 @@ void unmap_pages(pagetable_t pagetable, uint64_t va, uint64_t size) {
     sfence_vma();
 }
 
-// helper to walk pagetable recursively and free page-table pages and leaf pages
-static void free_pagetable_recursive(pagetable_t p, int level) {
-    if (!p) return;
-    for (int i = 0; i < 512; i++) {
-        pte_t ent = p[i];
-        // 只关心指向下一级页表的PTE，忽略叶子PTE
-        if ((ent & PTE_V) && (ent & (PTE_R | PTE_W | PTE_X)) == 0) {
-            // non-leaf -> recurse
-            uint64_t child_pa = pte_to_pa(ent);
-            pagetable_t child = (pagetable_t)PA2VA(child_pa);
-            free_pagetable_recursive(child, level - 1);
-            // p[i] = 0; // 这一行可有可无，因为马上就要释放 p 了
-        }
-    }
-    // free this page table page itself
-    kfree((void *)p);
-}
+void freevm(pagetable_t pagetable, uint64 sz) {
+  if(pagetable == 0) return;
 
-void freevm(pagetable_t pagetable, uint64_t sz) {
-    if (!pagetable) return;
-    // free all mapped pages and page-table pages
-    free_pagetable_recursive(pagetable, 2);
+  if(sz > 0) {
+    // 关键步骤 1: 先卸载并释放用户物理内存
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+  }
+  
+  // 关键步骤 2: 再释放页表结构本身
+  freewalk(pagetable);
 }
 
 // copyuvm: copy user memory from old pagetable into a newly allocated pagetable
@@ -277,7 +265,6 @@ pagetable_t uvmcreate() {
   // 1. 分配页表页 (确保你的 alloc_pagetable_page 里有 memset 0)
   pagetable = proc_pagetable_create(); 
   if(pagetable == 0) return 0;
-
   // 2. === 关键修复：映射 Trampoline 到用户页表 ===
   // 这样当 satp 切换到用户页表后，CPU 依然能在高地址找到代码执行
   if(mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X) < 0){
@@ -417,20 +404,16 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
   uint64 pa, i;
   uint flags;
   char *mem;
-
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
-    
+      continue;
     pa = pte_to_pa(*pte);
     flags = PTE_FLAGS(*pte);
-
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)PA2VA(pa), PGSIZE);
-
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;
@@ -490,7 +473,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
-  *pte &= ~PTE_U;
+  *pte = 0; 
 }
 
 uint64
@@ -524,12 +507,14 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
-      continue;   
+      continue;  
     if((*pte & PTE_V) == 0)  // has physical page been allocated?
-      continue;
+      continue;  
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
     if(do_free){
       uint64 pa = pte_to_pa(*pte);
-      kfree((void*)pa);
+      kfree((void*)PA2VA(pa));
     }
     *pte = 0;
   }
@@ -544,9 +529,11 @@ freewalk(pagetable_t pagetable)
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
       // this PTE points to a lower-level page table.
       uint64 child = pte_to_pa(pte);
-      freewalk((pagetable_t)child);
+      freewalk((pagetable_t)PA2VA(child));
       pagetable[i] = 0;
     } else if(pte & PTE_V){
+      printf("PANIC INFO: freewalk found leaf PTE at index %d\n", i);
+      printf("PANIC INFO: PTE=%p, PA=%p\n", pte, pte_to_pa(pte));
       panic("freewalk: leaf");
     }
   }

@@ -53,9 +53,6 @@ static void commit();
 void
 initlog(int dev, struct superblock *sb)
 {
-  // === 【调试代码】 ===
-  printf("INITLOG: Initializing log on dev %d, logstart=%d, nlog=%d\n", dev, sb->logstart, sb->nlog);
-  // ====================
   if (sizeof(struct logheader) >= BSIZE)
     panic("initlog: too big logheader");
 
@@ -63,7 +60,6 @@ initlog(int dev, struct superblock *sb)
   log.start = sb->logstart;
   log.dev = dev;
   recover_from_log();
-  printf("INITLOG: Log init complete.\n");
 }
 
 // Copy committed blocks from log to their home location

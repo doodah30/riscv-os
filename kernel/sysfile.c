@@ -308,9 +308,7 @@ uint64 sys_exec(void) {
     if(fetchstr(uarg, argv[i], PGSIZE) < 0)
       goto bad;
   }
-
   int ret = exec(path, argv);
-
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
     kfree(argv[i]);
 
@@ -320,4 +318,84 @@ uint64 sys_exec(void) {
   for(i = 0; i < NELEM(argv) && argv[i] != 0; i++)
     kfree(argv[i]);
   return -1;
+}
+
+static int
+isdirempty(struct inode *dp)
+{
+  int off;
+  struct dirent de;
+
+  for(off=2*sizeof(de); off<dp->size; off+=sizeof(de)){
+    if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+      panic("isdirempty: readi");
+    if(de.inum != 0)
+      return 0;
+  }
+  return 1;
+}
+
+uint64 sys_unlink(void) {
+  struct inode *ip, *dp;
+  struct dirent de;
+  char name[DIRSIZ], path[MAXPATH];
+  uint off;
+
+  if(argstr(0, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  // 查找父目录
+  if((dp = nameiparent(path, name)) == 0){
+    end_op();
+    return -1;
+  }
+
+  ilock(dp);
+
+  // 确保不能删除 "." 和 ".."
+  if(namecmp(name, ".") == 0 || namecmp(name, "..") == 0)
+    goto bad;
+
+  if((ip = dirlookup(dp, name, &off)) == 0)
+    goto bad;
+  ilock(ip);
+
+  if(ip->nlink < 1)
+    panic("unlink: nlink < 1");
+  if(ip->type == T_DIR && !isdirempty(ip)){
+    iunlockput(ip);
+    goto bad;
+  }
+
+  memset(&de, 0, sizeof(de));
+  if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+    panic("unlink: writei");
+  
+  if(ip->type == T_DIR){
+    dp->nlink--;
+    iupdate(dp);
+  }
+  iunlockput(dp);
+
+  ip->nlink--;
+  iupdate(ip);
+  iunlockput(ip);
+
+  end_op();
+  return 0;
+
+bad:
+  iunlockput(dp);
+  end_op();
+  return -1;
+}
+
+// 获取系统启动时间 (Ticks)
+uint64 sys_uptime(void) {
+  uint xticks;
+  acquire(&tickslock);
+  xticks = ticks;
+  release(&tickslock);
+  return xticks;
 }

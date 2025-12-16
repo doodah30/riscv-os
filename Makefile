@@ -48,6 +48,7 @@ OBJS_ALL = $(OBJS)        # 手动列清单
 # 1. 定义用户程序列表
 UPROGS=\
     $U/_init\
+    $U/_fstest\
 
 # 指定用户目录
 U=user
@@ -62,10 +63,20 @@ $U/usys.o: $U/usys.S
 # 链接成可执行文件 _init
 # 注意：我们需要一个简单的链接脚本或者入口点。
 # xv6 使用 _main 作为入口，这里简化直接链接。
-$U/_init: $U/init.o $U/usys.o
-	$(CC) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_init.out $U/init.o $U/usys.o
-	$(OBJCOPY) -S -O binary $U/_init.out $U/_init
-	$(OBJCOPY) -S $U/_init.out $U/init.asm
+ULDFLAGS = -march=rv64gc -mabi=lp64 -mcmodel=medany -nostdlib
+
+$U/ulib.o: $U/ulib.c
+	$(CC) $(CFLAGS) -c $U/ulib.c -o $U/ulib.o
+
+# 2. 修改 _init 的链接规则 (加上 $U/ulib.o)
+$U/_init: $U/init.o $U/usys.o $U/ulib.o
+	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_init $U/init.o $U/usys.o $U/ulib.o
+	$(OBJCOPY) -S $U/_init $U/init.asm
+
+# 3. 修改 _fstest 的链接规则 (加上 $U/ulib.o)
+$U/_fstest: $U/fstest.o $U/usys.o $U/ulib.o
+	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_fstest $U/fstest.o $U/usys.o $U/ulib.o
+	$(OBJCOPY) -S $U/_fstest $U/fstest.asm
 
 all: kernel.elf fs.img
 
@@ -91,7 +102,7 @@ mkfs/mkfs: mkfs/mkfs.c
 # 生成 fs.img
 # 这里暂时创建一个空的 README 文件进去演示，以后你可以放用户程序
 fs.img: mkfs/mkfs $(UPROGS)
-	./mkfs/mkfs fs.img README $(UPROGS)
+	./mkfs/mkfs fs.img $(UPROGS)
 
 # QEMU 基本参数
 QEMUOPTS = -machine virt -nographic -bios none -kernel kernel.elf -m 128M -smp 1
@@ -116,3 +127,7 @@ qemu-gdb: kernel.elf  fs.img
 # 清理
 clean:
 	@rm -f $(K)/*.o kernel.elf kernel.bin fs.img mkfs/mkfs
+	@rm -f user/*.o user/*.asm user/_*
+
+qemu-persist: kernel.elf
+	@qemu-system-riscv64 $(QEMUOPTS)

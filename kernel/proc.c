@@ -12,14 +12,13 @@
 #include "fcntl.h"
 
 uchar initcode[] = {
-    0x93, 0x08, 0x00, 0x01, // li a7, 16
-    0x13, 0x05, 0x10, 0x00, // li a0, 1
-    0x93, 0x05, 0x00, 0x00, // li a1, 0
-    0x13, 0x06, 0xc0, 0x00, // li a2, 12
-    0x73, 0x00, 0x00, 0x00, // ecall
-
-    0x93, 0x08, 0x20, 0x00, // li a7, 2
-    0x73, 0x00, 0x00, 0x00, // ecall
+  0x17, 0x05, 0x00, 0x00, 0x13, 0x05, 0x45, 0x02,
+  0x97, 0x05, 0x00, 0x00, 0x93, 0x85, 0x35, 0x02,
+  0x93, 0x08, 0x70, 0x00, 0x73, 0x00, 0x00, 0x00,
+  0x93, 0x08, 0x20, 0x00, 0x73, 0x00, 0x00, 0x00,
+  0xef, 0xf0, 0x9f, 0xff, 0x2f, 0x69, 0x6e, 0x69,
+  0x74, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00
 };
 
 struct cpu cpus[NCPU];
@@ -31,6 +30,7 @@ struct spinlock pid_lock;
 
 extern void forkret(void); // 在 trap.c 或 kernelvec.S 中定义，或者是新建的
 extern char trampoline[];
+static void freeproc(struct proc *p);
 
 void forkret(void) {
   static int first = 1;
@@ -223,8 +223,10 @@ void sleep(void *chan, struct spinlock *lk) {
     }
     
     // 必须持有 p->lock 才能修改 p->state
-    acquire(&p->lock);
+    if(lk != &p->lock){ 
+    acquire(&p->lock); // 只有当 lk 不是 p->lock 时才获取
     release(lk);
+    }
 
     p->chan = chan;
     p->state = SLEEPING;
@@ -233,8 +235,10 @@ void sleep(void *chan, struct spinlock *lk) {
 
     // 醒来后
     p->chan = 0;
+    if(lk != &p->lock){
     release(&p->lock);
     acquire(lk);
+    }
 }
 
 // 唤醒
@@ -284,17 +288,27 @@ void userinit(void) {
       p->ofile[1] = f;
       // 增加引用计数（filealloc 初始为 1，这里被 ofile[1] 持有）
   }
+  p->cwd = namei("/");
+  
+  // 检查是否成功
+  if(p->cwd == 0) {
+      panic("userinit: namei / failed");
+  }
   // ===============================================
 }
 
 void exit(int status) {
   struct proc *p = myproc();
 
-  //if(p == initproc)
-  //  panic("init exiting");
+  if(p == initproc)
+    panic("init exiting");
 
   // 打印一条日志方便调试
-  printf("PID %d exited with status %d\n", p->pid, status);
+  //printf("PID %d exited with status %d\n", p->pid, status);
+
+  if(p->parent) {
+      wakeup(p->parent);
+  }
 
   // 获取进程锁
   acquire(&p->lock);
@@ -332,20 +346,28 @@ int growproc(int n) {
 
 // 创建当前进程的副本
 int fork(void) {
-  int pid;
+  int i, pid;
   struct proc *np;
   struct proc *p = myproc();
-
   // 1. 分配新进程
   if((np = allocproc()) == 0){
     return -1;
   }
-
+  np->pagetable = uvmcreate();
+  if(np->pagetable == 0){
+    freeproc(np); // 或者 release(&np->lock); return -1;
+    release(&np->lock);
+    return -1;
+  }
+  if(mappages(np->pagetable, TRAPFRAME, PGSIZE,
+              (uint64)(np->trapframe), PTE_R | PTE_W) < 0){
+    panic("fork: map trapframe");
+  }
   // 2. 复制用户内存
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     // freeproc(np); // 暂时简化，不处理释放
     release(&np->lock);
-    return -1;
+    panic("fork: uvmcopy");
   }
   np->sz = p->sz;
   np->parent = p;
@@ -355,12 +377,15 @@ int fork(void) {
   // 4. fork 返回值：子进程返回 0
   np->trapframe->a0 = 0;
 
+  for(i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
   // 5. 复制名字
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
-
-  release(&np->lock);
 
   // 6. 设置子进程状态为可运行
   acquire(&np->lock);
@@ -466,36 +491,68 @@ proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
 
-  // An empty page table.
   pagetable = uvmcreate();
   if(pagetable == 0)
     return 0;
 
-  // map the trampoline code (for system call return)
-  // at the highest user virtual address.
-  // only the supervisor uses it, on the way
-  // to/from user space, so not PTE_U.
-  if(mappages(pagetable, TRAMPOLINE, PGSIZE,
-              (uint64)trampoline, PTE_R | PTE_X) < 0){
-    uvmfree(pagetable, 0);
-    return 0;
-  }
-
-  // map the trapframe page just below the trampoline page, for
-  // trampoline.S.
   if(mappages(pagetable, TRAPFRAME, PGSIZE,
               (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
     uvmfree(pagetable, 0);
     return 0;
   }
-
   return pagetable;
 }
-void
-proc_freepagetable(pagetable_t pagetable, uint64 sz)
-{
-  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, TRAPFRAME, 1, 0);
+void proc_freepagetable(pagetable_t pagetable, uint64 sz) { 
+  uvmclear(pagetable, TRAMPOLINE);
+  uvmclear(pagetable, TRAPFRAME);
+
   uvmfree(pagetable, sz);
+
+}
+
+void
+procdump(void)
+{
+  static char *states[] = {
+  [UNUSED]    "unused",
+  [USED]      "used",
+  [SLEEPING]  "sleep ",
+  [RUNNABLE]  "runble",
+  [RUNNING]   "run   ",
+  [ZOMBIE]    "zombie"
+  };
+  struct proc *p;
+  char *state;
+
+  printf("\n");
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
+      state = states[p->state];
+    else
+      state = "???";
+    printf("%d %s %s", p->pid, state, p->name);
+    printf("\n");
+  }
+}
+
+static void
+freeproc(struct proc *p)
+{
+  if(p->trapframe)
+    kfree((void*)p->trapframe);
+  p->trapframe = 0;
+  if(p->pagetable)
+    proc_freepagetable(p->pagetable, p->sz);
+  p->pagetable = 0;
+  p->sz = 0;
+  p->pid = 0;
+  p->parent = 0;
+  p->name[0] = 0;
+  p->chan = 0;
+  p->killed = 0;
+  p->xstate = 0;
+  p->state = UNUSED;
 }

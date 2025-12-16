@@ -58,18 +58,6 @@ virtio_disk_init(void)
 
   initlock(&disk.vdisk_lock, "virtio_disk");
 
-  uint32 magic = *(volatile uint32 *)(VIRTIO0 + VIRTIO_MMIO_MAGIC_VALUE);
-  uint32 ver   = *(volatile uint32 *)(VIRTIO0 + VIRTIO_MMIO_VERSION);
-  uint32 devid = *(volatile uint32 *)(VIRTIO0 + VIRTIO_MMIO_DEVICE_ID);
-  uint32 venid = *(volatile uint32 *)(VIRTIO0 + VIRTIO_MMIO_VENDOR_ID);
-  
-  printf("virtio_disk_init: trying to find disk...\n");
-  printf("  VIRTIO0      = 0x%x\n", VIRTIO0);
-  printf("  MMIO_MAGIC   = 0x%x (expected 0x74726976)\n", magic);
-  printf("  MMIO_VERSION = 0x%x (expected 1 or 2)\n", ver);
-  printf("  MMIO_DEVICE  = 0x%x (expected 2 for block device)\n", devid);
-  printf("  MMIO_VENDOR  = 0x%x (expected 0x554d4551)\n", venid);
-
   if(*R(VIRTIO_MMIO_MAGIC_VALUE) != 0x74726976 ||
      *R(VIRTIO_MMIO_DEVICE_ID) != 2 ||
      *R(VIRTIO_MMIO_VENDOR_ID) != 0x554d4551){

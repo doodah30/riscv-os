@@ -5,6 +5,9 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+volatile int panicking = 0; // printing a panic message
+volatile int panicked = 0; // spinning forever at end of a panic
+
 static void printint(int xx, int base, int sign) {
   static char digits[] = "0123456789abcdef";
   char buf[16];

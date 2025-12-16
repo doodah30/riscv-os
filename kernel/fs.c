@@ -21,37 +21,19 @@ static void
 readsb(int dev, struct superblock *sb)
 {
   struct buf *bp;
-  // === 【调试代码】 ===
-  printf("READSB: reading block 1 (superblock) from dev %d...\n", dev);
-  // ====================
   bp = bread(dev, 1);
-  // === 【调试代码】 ===
-  printf("READSB: bread returned buf %p. Copying superblock...\n", bp);
-  // ====================
   memmove(sb, bp->data, sizeof(*sb));
   brelse(bp);
-  // === 【调试代码】 ===
-  printf("READSB: Superblock copied and released.\n");
-  // ====================
 }
 
 // Init fs
 void
 fsinit(int dev) {
-  // === 【调试代码】 ===
-  printf("FSINIT: Initializing file system on dev %d...\n", dev);
-  // ====================
   readsb(dev, &sb);
-  // === 【调试代码】 ===
-  printf("FSINIT: Superblock read. Magic=0x%x, Size=%d, nblocks=%d\n", sb.magic, sb.size, sb.nblocks);
-  // ====================
   if(sb.magic != FSMAGIC)
     panic("invalid file system");
 
   initlog(dev, &sb);
-  // === 【调试代码】 ===
-  printf("FSINIT: initlog done.\n");
-  // ====================
   ireclaim(dev);
 }
 
