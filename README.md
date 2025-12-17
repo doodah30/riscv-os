@@ -14,7 +14,7 @@
 
 请根据下表切换到相应的分支查看：
 
-| 实验阶段 | 实验主题 | 核心功能与技术点 | 状态 |
+| 实验阶段 | 实验主题 | 核心功能与技术点 | 状态 | 
 | :--- | :--- | :--- | :--- |
 | **Lab 0** | 开发环境搭建 | 工具链安装 (GCC, QEMU), GDB 调试配置 | 完成 |
 | **Lab 1** | RISC-V 引导与裸机启动 | `entry.S` 汇编启动, 栈设置, UART 串口驱动, Hello OS | 完成 | first |
@@ -24,7 +24,7 @@
 | **Lab 5** | 进程管理与调度 | 进程控制块 (PCB), 上下文切换 (`swtch`), 抢占式轮转调度 | 完成 | fifth |
 | **Lab 6** | 系统调用 | 用户态/内核态切换 (`trampoline`), `ecall` 处理, 基础 Syscalls | 完成 | sixth |
 | **Lab 7** | 文件系统 | VirtIO 驱动, Buffer Cache, 日志系统, Inode, `exec` 加载器 | 完成 | seventh |
-| **Lab 8** | 系统扩展 (Extensions) | **优先级调度器 (Priority Scheduling)**, 防饥饿 Aging 机制 | 完成 | eighth |
+| **Lab 8** | 系统扩展 | 优先级调度器, 防饥饿 Aging 机制 | 完成 | eighth |
 
 ## 如何开始 (Getting Started)
 
@@ -76,4 +76,5 @@ make qemu
 请前往对应分支阅读详细文档。
 
 ---
+
 *Created by [doodah30]*
