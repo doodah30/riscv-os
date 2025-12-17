@@ -1,133 +1,79 @@
-这是 **从零构建操作系统 (riscv-os)** 的扩展实验项目。
-在本实验中，我们将 xv6 原生的简单轮转调度器（Round-Robin）改造成了一个支持 **动态优先级** 的调度器。
+# 从零构建 RISC-V 操作系统
 
-## 实验目标与特性
+欢迎来到 **riscv-os** 项目！
 
-1.  **优先级支持**：进程拥有 `priority` 属性 (0-10, 10最高)，调度器总是优先选择优先级最高的 `RUNNABLE` 进程。
-2.  **同级公平性 (Round-Robin)**：当多个进程优先级相同时，调度器根据已运行时间 (`ticks`) 进行公平轮转，避免先来先服务 (FCFS)。
-3.  **防饥饿老化 (Aging)**：引入老化机制，当低优先级进程等待时间过长时，动态提升其优先级。
-4.  **系统调用**：新增 `setpriority` (设置优先级) 和 `ps` (查看进程状态) 系统调用。
+这是一个用于教学和学习目的的操作系统内核实现项目。本项目遵循循序渐进的原则，从第一行汇编代码开始，逐步构建一个运行在 RISC-V 架构（QEMU 模拟器）上的类 Unix 操作系统。
 
-## 测试指南：如何复现三种调度场景
+本系统最终实现了一个具备**虚拟内存**、**抢占式调度**、**文件系统**、**系统调用**以及**用户 Shell** 的完整微内核。
 
-为了验证调度器的不同特性，我们需要**修改内核代码**（开启/关闭 Aging）以及**切换用户测试程序**。
+## 项目结构与分支导航
 
-### 核心配置文件说明
+> **重要提示**：
+> 本仓库采用 **分支 (Branch)** 管理开发进度。
+> `main` 分支仅作为项目索引。**请切换到对应的实验分支**以查看具体阶段的完整代码、实现细节和该阶段的 `README` 文档。
 
-1.  **内核配置** (`kernel/proc.c`): 控制是否开启老化 (Aging) 机制。
-2.  **启动配置** (`user/init.c`): 控制启动时运行哪个测试程序 (`prio_test` 或 `same_prio_test`)。
+请根据下表切换到相应的分支查看：
 
----
+| 实验阶段 | 实验主题 | 核心功能与技术点 | 状态 |
+| :--- | :--- | :--- | :--- |
+| **Lab 0** | 开发环境搭建 | 工具链安装 (GCC, QEMU), GDB 调试配置 | 完成 |
+| **Lab 1** | RISC-V 引导与裸机启动 | `entry.S` 汇编启动, 栈设置, UART 串口驱动, Hello OS | 完成 | first |
+| **Lab 2** | 内核输出与库函数 | 格式化输出 `printf` 实现, 显存控制, 字符串处理 | 完成 | second |
+| **Lab 3** | 页表与内存管理 | Sv39 虚拟内存, 页表映射, 物理内存分配器 (`kalloc`) | 完成 | third |
+| **Lab 4** | 中断处理与时钟 | Trap 机制, 上下文保存, 时钟中断 (`timer`), PLIC 初始化 | 完成 | fourth |
+| **Lab 5** | 进程管理与调度 | 进程控制块 (PCB), 上下文切换 (`swtch`), 抢占式轮转调度 | 完成 | fifth |
+| **Lab 6** | 系统调用 | 用户态/内核态切换 (`trampoline`), `ecall` 处理, 基础 Syscalls | 完成 | sixth |
+| **Lab 7** | 文件系统 | VirtIO 驱动, Buffer Cache, 日志系统, Inode, `exec` 加载器 | 完成 | seventh |
+| **Lab 8** | 系统扩展 (Extensions) | **优先级调度器 (Priority Scheduling)**, 防饥饿 Aging 机制 | 完成 | eighth |
 
-### 场景 1：同级轮转 (Round-Robin)
-**目标**：验证当优先级相同时，两个进程能否公平地交替运行。
+## 如何开始 (Getting Started)
 
-1.  **修改内核 (`kernel/proc.c`)**：**关闭 Aging**
-    *   找到 `update_process_times` 函数。
-    *   **注释掉** 优先级提升的代码，防止干扰测试。
-    ```c
-    // kernel/proc.c -> update_process_times
-    if(p->state == RUNNABLE) {
-      p->wait_time++;
-      /* 注释掉下面这段 Aging 逻辑
-      if(p->wait_time > AGING_THRESHOLD) {
-          if(p->priority < MAX_PRIO) p->priority++;
-          p->wait_time = 0;
-      }
-      */
-    }
-    ```
-
-2.  **修改启动项 (`user/init.c`)**：运行 `same_prio_test`
-    ```c
-    // user/init.c -> main
-    char *argv[] = { "same_prio_test", 0 };
-    exec("same_prio_test", argv);
-    ```
-
-3.  **运行**：
-    ```bash
-    make clean && make qemu
-    ```
-    **预期结果**：输出乱序（并发），Snapshot 中两个进程 `TICKS` 数量几乎相等 (e.g., 443 vs 443)。
-
----
-
-### 场景 2：严格优先级 (Strict Priority)
-**目标**：验证高优先级进程是否能完全压制低优先级进程（低优先级饿死）。
-
-1.  **修改内核 (`kernel/proc.c`)**：**关闭 Aging** (同场景 1)
-    *   保持 Aging 代码被注释的状态。
-
-2.  **修改启动项 (`user/init.c`)**：运行 `prio_test`
-    ```c
-    // user/init.c -> main
-    char *argv[] = { "prio_test", 0 };
-    exec("prio_test", argv);
-    ```
-
-3.  **运行**：
-    ```bash
-    make clean && make qemu
-    ```
-    **预期结果**：High Prio 先打印 finished。Snapshot 中 High Prio 已经跑完 (ZOMBIE)，Low Prio 还没开始跑 (TICKS=0)。
-
----
-
-### 场景 3：老化机制 (Aging)
-**目标**：验证低优先级进程在等待足够长的时间后，能否被提升优先级并获得 CPU。
-
-1.  **修改内核 (`kernel/proc.c`)**：**开启 Aging**
-    *   找到 `update_process_times` 函数。
-    *   **解除注释**，恢复 Aging 逻辑。
-    ```c
-    // kernel/proc.c -> update_process_times
-    if(p->state == RUNNABLE) {
-      p->wait_time++;
-      // === 解除注释 ===
-      if(p->wait_time > AGING_THRESHOLD) {
-          if(p->priority < MAX_PRIO) p->priority++;
-          p->wait_time = 0;
-      }
-      // ===============
-    }
-    ```
-
-2.  **修改启动项 (`user/init.c`)**：运行 `prio_test` (同场景 2)
-    *   保持运行 `prio_test`。
-
-3.  **运行**：
-    ```bash
-    make clean && make qemu
-    ```
-    **预期结果**：Low Prio 不再为 0 TICKS。Snapshot 中可以看到 Low Prio 的优先级从初始值 (2) 被提升到了更高 (如 9 或 10)。Low Prio 最终能完成运行。
-
----
-
-## 关键文件说明
-
-| 文件 | 说明 |
-| :--- | :--- |
-| `kernel/proc.h` | 增加了 `priority`, `ticks`, `wait_time` 字段 |
-| `kernel/proc.c` | **`scheduler`**: 实现了寻找最高优先级 + 同级 tick 均衡的逻辑<br>**`update_process_times`**: 实现了 Aging 逻辑 |
-| `kernel/sysproc.c` | 实现了 `sys_setpriority` 和 `sys_ps` |
-| `user/prio_test.c` | 测试高低优先级进程的竞争 (用于场景 2 和 3) |
-| `user/same_prio_test.c` | 测试同级优先级进程的轮转 (用于场景 1) |
-| `user/ps.c` | 用户态进程查看工具 |
-
-## 调度算法伪代码
-
-```c
-// 1. 遍历所有 RUNNABLE 进程
-for p in proc:
-    // 策略 A: 优先级更高者优先
-    if p.priority > max_prio:
-        best = p
-    
-    // 策略 B: 优先级相同时，运行时间(ticks)少者优先 (Round-Robin)
-    else if p.priority == max_prio:
-        if p.ticks < best.ticks:
-            best = p
+### 1. 克隆仓库
+```bash
+git clone https://github.com/doodah30/riscv-os.git
+cd riscv-os
 ```
 
+### 2. 切换到具体实验
+例如，如果你想查看 **文件系统 (Lab 7)** 的代码：
+```bash
+# 查看所有远程分支
+git branch -r
+
+# 切换到实验7的分支
+git checkout seventh
+```
+
+### 3. 编译与运行
+确保你已经安装了 `qemu-system-riscv64` 和 `riscv64-unknown-elf-gcc`。
+进入对应分支后：(请以分支内README为参考)
+
+```bash
+# 编译并启动 QEMU
+make qemu
+
+# 退出 QEMU
+# 按下 Ctrl+A，松开后按 X
+```
+
+## 最终成果展示 (基于 Lab 8)
+
+在最终的实验分支中，操作系统已经具备了以下高级特性：
+
+*   **Shell 交互**：支持基础的用户态 Shell 和命令执行。
+*   **持久化存储**：支持 `Crash-safe` 的日志文件系统，断电数据不丢失。
+*   **多道程序**：支持 `fork`, `exec`, `wait`, `exit` 等进程生命周期管理。
+*   **智能调度**：实现了支持优先级、同级公平轮转（Round-Robin）和防饥饿老化（Aging）的调度算法。
+*   **用户程序**：能够运行 C 语言编写的 `init`, `fstest` (文件系统测试), `prio_test` (调度测试) 等程序。
+
+## 文档说明
+
+每个实验分支的根目录下都有一个独立的 `README.md`，其中包含了：
+*   该阶段的具体实现细节。
+*   遇到的核心 Bug 及解决方案（Troubleshooting）。
+*   测试方法与运行截图。
+
+请前往对应分支阅读详细文档。
+
 ---
+*Created by [doodah30]*
