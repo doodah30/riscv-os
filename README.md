@@ -1,102 +1,101 @@
-这是 **从零构建操作系统 (riscv-os)** 的第七个实验阶段。
-在本实验中，我们将操作系统从一个单纯的内存驻留程序，升级为一个**能够持久化存储数据、加载并运行磁盘程序**的完整内核。
-
-我们实现了一个类 xv6 的文件系统栈，支持崩溃一致性（Crash Safety），并打通了从磁盘加载 ELF 二进制文件 (`exec`) 的全过程。
+这是 **从零构建操作系统 (riscv-os)** 的第六个实验阶段。
+在本实验中，我们打破了内核的壁垒，实现了**用户态（User Mode）**与**内核态（Kernel Mode）**的安全隔离与交互机制。操作系统现在能够运行受限的用户进程，并通过系统调用请求内核服务。
 
 ## 实验目标
-1.  **底层驱动**：实现 VirtIO-Blk 磁盘驱动，通过 MMIO 与 QEMU 模拟的磁盘设备交互。
-2.  **文件系统核心**：实现缓冲区缓存 (`bio.c`)、日志系统 (`log.c`)、Inode 管理 (`fs.c`) 和文件描述符抽象 (`file.c`)。
-3.  **系统调用扩展**：实现文件操作相关的系统调用 (`open`, `write`, `read`, `mkdir`, `dup`, `fstat` 等)。
-4.  **用户程序加载**：实现 `exec` 系统调用，解析 ELF 文件头，将用户程序加载到内存并执行。
-5.  **用户态环境**：编写用户态库 (`ulib.c`) 和测试程序 (`init.c`, `fstest.c`)。
+1.  **特权级切换**：实现用户态到内核态的上下文切换机制（Trap Mechanism）。
+2.  **内存隔离**：建立用户虚拟地址空间布局，包括特殊的 `TRAMPOLINE` 和 `TRAPFRAME` 映射。
+3.  **系统调用框架**：实现 `syscall` 分发器，处理 `ecall` 指令。
+4.  **核心系统调用**：实现 `fork` (进程创建), `wait` (进程回收), `exit` (进程退出), `write` (输出), `getpid` 等基础调用。
+5.  **安全检查**：确保用户程序不能访问内核内存（基于页表权限位 `PTE_U` 的检查）。
 
 ## 完成功能特性
 
-### 1. 存储系统
-- **VirtIO 驱动**：支持 VirtIO MMIO 协议（强制 Version 2），实现块设备的读写。
-- **Buffer Cache**：基于 LRU 策略和睡眠锁（Sleep Lock）的双向链表缓存机制。
-- **日志系统 (Logging)**：实现预写日志（Write-Ahead Log），保证文件系统元数据操作的原子性。
-- **文件抽象**：支持 Inode、目录、路径名解析，以及标准输入输出（Console）设备文件。
+- **Trap 机制**：编写了 `trampoline.S` 汇编代码，实现了 `uservec`（保存用户上下文）和 `userret`（恢复用户上下文）。
+- **内存映射**：在内核页表和用户页表的最高地址（`MAXVA`）处统一映射了跳板页（Trampoline），解决了页表切换时的地址连续性问题。
+- **参数传递**：实现了 `argint`, `argaddr` 等辅助函数，从 Trapframe 的寄存器（`a0`-`a7`）中提取系统调用参数。
+- **安全数据传输**：实现了 `copyin`/`copyout`，在内核与用户空间传输数据时严格检查 `PTE_U` 权限，防止恶意指针攻击。
+- **综合测试**：编写了用户态测试程序 `systest.c`，全面验证功能与安全性。
 
-### 2. 进程与内存
-- **Exec 加载器**：废弃了手写的 `initcode` 机器码，改为从磁盘加载标准的 ELF 可执行文件。
-- **内存管理增强**：支持用户栈的 Guard Page（保护页），支持稀疏内存布局的释放。
-- **完善的销毁逻辑**：实现了 `proc_freepagetable`，解决了进程退出时 Trampoline 和 Trapframe 的映射清理问题。
+## 技术架构：Trap 处理流
 
-### 3. 用户态工具
-- **`init` 进程**：系统的第一个用户进程，负责初始化控制台并启动测试。
-- **`fstest`**：综合测试套件，涵盖完整性、并发、持久化和性能测试。
-- **`printf`**：实现了支持 64 位参数解析的用户态格式化输出。
+当用户程序执行系统调用（如 `write`）时，CPU 的执行流如下：
 
-## 关键技术挑战与解决方案
+```mermaid
+sequenceDiagram
+    participant User as 用户程序 (User)
+    participant Tramp as Trampoline.S
+    participant Trap as Trap.c (Kernel)
+    participant Sys as Syscall.c (Kernel)
 
-本实验经历了深度的调试过程，解决了以下核心难题：
+    User->>Tramp: ecall 指令 (触发异常)
+    Note right of User: 从 U-mode 切换到 S-mode
+    Tramp->>Tramp: uservec: 保存用户寄存器到 Trapframe
+    Tramp->>Trap: 切换页表 -> 跳转到 usertrap()
+    Trap->>Sys: 检查 scause=8 -> 调用 syscall()
+    Sys->>Sys: 根据 a7 寄存器分发到 sys_write
+    Sys-->>Trap: 返回结果 (存入 trapframe->a0)
+    Trap->>Tramp: usertrapret(): 准备返回
+    Tramp->>User: userret: 恢复寄存器 -> sret 指令
+```
 
-1.  **VirtIO 协议版本不匹配**
-    - **现象**：驱动初始化时读取 Magic Number 成功，但发送请求后死锁，不产生中断。
-    - **原因**：驱动代码基于 VirtIO v2 (Modern)，而 QEMU 默认提供 v1 (Legacy)。
-    - **解决**：在 Makefile 中添加 `-global virtio-mmio.force-legacy=false` 强制 QEMU 使用 Modern 协议。
+## 关键文件说明
 
-2.  **启动阶段的死锁 (Panic: holding lk is NULL)**
-    - **现象**：`main` 函数初始化文件系统时触发 Panic。
-    - **原因**：`fsinit` 调用磁盘读写时，当前 CPU 尚未运行任何进程 (`myproc() == NULL`)，但 `sleep` 函数试图获取当前进程的锁。
-    - **解决**：调整初始化顺序（先中断后 FS），并修改 `sleep` 函数，在无进程上下文时回退为自旋等待中断 (`wfi`)。
-
-3.  **中断丢失与委托**
-    - **现象**：磁盘操作完成后，内核无法收到 PLIC 中断，导致驱动无限休眠。
-    - **原因**：M-mode 启动代码 (`start.c`) 未设置 `mideleg`，导致外部中断被 M-mode 拦截。
-    - **解决**：设置 `w_mideleg(0xffff)` 将所有中断委托给 S-mode 处理。
-
-4.  **Exec 内存释放崩溃 (Panic: freewalk leaf)**
-    - **现象**：`exec` 销毁旧页表时 Panic。
-    - **原因**：`uvmunmap` (或 `uvmclear`) 仅清除了用户权限位，未清除有效位 (`PTE_V`)，导致 `freewalk` 误判页表非空。
-    - **解决**：强制在解映射时将 PTE 清零，并在 `vm.c` 中正确处理 Guard Page 的跳过逻辑。
+| 文件路径 | 说明 |
+| :--- | :--- |
+| `kernel/trampoline.S` | **核心汇编**：用户态与内核态切换的跳板代码 |
+| `kernel/trap.c` | **中断处理**：`usertrap` (处理异常/系统调用) 和 `usertrapret` (返回用户态) |
+| `kernel/syscall.c` | **分发器**：定义系统调用号与处理函数的映射，参数解析 |
+| `kernel/sysproc.c` | **进程类实现**：`sys_fork`, `sys_exit`, `sys_wait`, `sys_getpid` 等 |
+| `kernel/vm.c` | **内存安全**：`copyin`/`copyout` 及其权限检查逻辑 |
+| `user/systest.c` | **测试程序**：专门用于测试各项系统调用的 C 语言程序 |
 
 ## 编译与运行
 
-### 1. 编译并启动
+由于系统调用的测试依赖于进程加载（Exec），本分支已包含基础的文件系统支持。
+
 ```bash
-# 编译内核、用户程序、制作文件系统镜像并启动 QEMU
+# 编译并启动 QEMU
 make qemu
 ```
 
-### 2. 持久化测试 (模拟断电)
-测试文件系统是否真的将数据写入了磁盘：
+系统启动后，`init` 进程会自动加载并运行 `systest` 测试程序。
 
-1.  运行 `make qemu`。
-2.  看到 `Please EXIT QEMU now!` 提示时，按下 `Ctrl+A` 松开后按 `X` 强制退出。
-3.  运行以下命令（保留旧的 `fs.img`）：
-    ```bash
-    make qemu-persist
-    ```
-4.  系统应报告 `Recovery Test PASSED`。
+## 测试结果与分析
 
-## 测试结果
-
-系统启动后会自动运行 `fstest`，预期输出如下：
+以下是 `systest` 在 QEMU 中的实际运行输出：
 
 ```text
-booting helloos...
-init: starting fstest...
-=== Starting Filesystem Tests ===
-[TEST] Filesystem Integrity...
+=== Starting Lab 6 System Call Tests ===
+[TEST] Basic Syscalls (getpid, fork, wait, exit)...
+  Current PID: 2
+  Child exiting with magic status 88...
+  Parent received correct status: 88
 PASSED
-[TEST] Concurrent Access...
+[TEST] Parameter Passing (write)...
+Hello
 PASSED
-[TEST] Performance (Write 1MB)...
-Time taken: 2662 ms(或者一些近似的值)
+[TEST] Security (Invalid Pointers)...
+  Write to kernel addr handled correctly (ret=-1)
+  Read to kernel addr handled correctly (ret=-1)
 PASSED
-=== All Tests Passed! ===
-init: test finished.
+[TEST] System Call Performance...
+  100000 getpid() calls took 1246 ms
+  Average: 12.4 us per call
+PASSED
+=== All Lab 6 Tests Passed! ===
 ```
 
-## 📂 目录结构说明
+### 结果解读
+1.  **基础功能 (Basic)**：
+    *   测试了 `fork` 创建子进程，子进程通过 `exit(88)` 退出。
+    *   父进程通过 `wait` 成功捕获到了状态码 **88**，证明进程间通信（IPC）和生命周期管理逻辑正确。
+2.  **参数传递 (Parameter)**：
+    *   `write` 成功输出了字符串，证明内核能正确从用户栈读取数据指针和长度。
+3.  **安全性 (Security)**：
+    *   测试程序尝试向内核地址 `0x80000000` 写入数据。
+    *   内核**没有崩溃**，而是返回了 `-1`。这证明 `walkaddr` 成功拦截了非法指针（检测到该地址没有 `PTE_U` 权限）。
+4.  **性能 (Performance)**：
+    *   单次空载系统调用 (`getpid`) 耗时约 **12.4 微秒**。
+    *   这表明 Trap 处理路径（寄存器保存/恢复、页表切换）效率很高，没有不必要的性能损耗。
 
-- `kernel/fs.c`: 文件系统核心（Inode, Directory, Path）。
-- `kernel/bio.c`: 缓冲区缓存 (Buffer Cache)。
-- `kernel/log.c`: 日志层 (Transactions)。
-- `kernel/virtio_disk.c`: 磁盘驱动。
-- `kernel/sysfile.c`: 文件相关系统调用接口。
-- `kernel/exec.c`: ELF 文件加载器。
-- `user/`: 用户态程序 (`init.c`, `fstest.c`, `ulib.c`)。
-- `mkfs/`: 宿主机工具，用于制作 `fs.img`。
+---

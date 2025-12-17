@@ -23,8 +23,12 @@ int main() {
   
   if(pid == 0){
     // 子进程执行测试
-    char *argv[] = { "fstest", 0 };
-    exec("fstest", argv);
+    //char *argv[] = { "fstest", 0 };
+    //exec("fstest", argv);
+    // === 执行 systest ===
+    char *argv[] = { "systest", 0 };
+    exec("systest", argv);
+    // ===========================
     printf("init: exec fstest failed\n");
     exit(1);
   }

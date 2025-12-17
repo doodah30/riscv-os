@@ -9,6 +9,7 @@ fs.img
 _init
 _fstest
 mkfs
+_systest
 
 *~
 .DS_Store

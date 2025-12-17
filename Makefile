@@ -49,6 +49,7 @@ OBJS_ALL = $(OBJS)        # 手动列清单
 UPROGS=\
     $U/_init\
     $U/_fstest\
+    $U/_systest\
 
 # 指定用户目录
 U=user
@@ -77,6 +78,10 @@ $U/_init: $U/init.o $U/usys.o $U/ulib.o
 $U/_fstest: $U/fstest.o $U/usys.o $U/ulib.o
 	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_fstest $U/fstest.o $U/usys.o $U/ulib.o
 	$(OBJCOPY) -S $U/_fstest $U/fstest.asm
+
+$U/_systest: $U/systest.o $U/usys.o $U/ulib.o
+	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_systest $U/systest.o $U/usys.o $U/ulib.o
+	$(OBJCOPY) -S $U/_systest $U/systest.asm
 
 all: kernel.elf fs.img
 
