@@ -22,7 +22,7 @@
 | **Lab 3** | 页表与内存管理 | Sv39 虚拟内存, 页表映射, 物理内存分配器 (`kalloc`) | 完成 | third |
 | **Lab 4** | 中断处理与时钟 | Trap 机制, 上下文保存, 时钟中断 (`timer`), PLIC 初始化 | 完成 | fourth |
 | **Lab 5** | 进程管理与调度 | 进程控制块 (PCB), 上下文切换 (`swtch`), 抢占式轮转调度 | 完成 | fifth |
-| **Lab 6** | 系统调用 | 用户态/内核态切换 (`trampoline`), `ecall` 处理, 基础 Syscalls | 完成 | sixth |
+| **Lab 6** | 系统调用 | 用户态/内核态切换 (`trampoline`), `ecall` 处理, 基础 Syscalls | 完成 | sixth2 |
 | **Lab 7** | 文件系统 | VirtIO 驱动, Buffer Cache, 日志系统, Inode, `exec` 加载器 | 完成 | seventh |
 | **Lab 8** | 系统扩展 | 优先级调度器, 防饥饿 Aging 机制 | 完成 | eighth |
 
