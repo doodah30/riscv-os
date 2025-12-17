@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "spinlock.h"
 
+#define MAX_PRIO 10
+#define MIN_PRIO 0
+#define DEFAULT_PRIO 5
+#define AGING_THRESHOLD 50
+
 // 进程状态
 enum procstate {
     UNUSED,
@@ -106,6 +111,9 @@ struct proc {
     struct inode *cwd;
     struct proc *parent;         // 父进程
     char name[16];               // 进程名 (调试用)
+    int priority;    // 优先级 (0-10, 10最高)
+    uint ticks;      // 已使用的 CPU 时间片数 (用于统计)
+    uint wait_time;  // 就绪后等待的时间片数 (用于 Aging)
 };
 
 #endif

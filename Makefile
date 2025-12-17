@@ -50,38 +50,29 @@ UPROGS=\
     $U/_init\
     $U/_fstest\
     $U/_systest\
+    $U/_prio_test\
+    $U/_ps\
+    $U/_nice\
+    $U/_same_prio_test\
 
 # 指定用户目录
 U=user
 
-# 2. 编译用户程序的规则
-$U/init.o: $U/init.c
-	$(CC) $(CFLAGS) -c $U/init.c -o $U/init.o
+# 用户链接选项 (不使用内核 ld 脚本，代码段从 0 开始)
+ULDFLAGS = -march=rv64gc -mabi=lp64 -mcmodel=medany -nostdlib
 
+# 2. 编译汇编库 (usys.S -> usys.o)
 $U/usys.o: $U/usys.S
 	$(CC) $(CFLAGS) -c $U/usys.S -o $U/usys.o
 
-# 链接成可执行文件 _init
-# 注意：我们需要一个简单的链接脚本或者入口点。
-# xv6 使用 _main 作为入口，这里简化直接链接。
-ULDFLAGS = -march=rv64gc -mabi=lp64 -mcmodel=medany -nostdlib
+# 3. [新增/关键] 通用 C 文件编译规则 (.c -> .o)
+# 这条规则适用于 init.c, fstest.c, prio_test.c, ulib.c 等所有用户 C 文件
+$U/%.o: $U/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$U/ulib.o: $U/ulib.c
-	$(CC) $(CFLAGS) -c $U/ulib.c -o $U/ulib.o
-
-# 2. 修改 _init 的链接规则 (加上 $U/ulib.o)
-$U/_init: $U/init.o $U/usys.o $U/ulib.o
-	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_init $U/init.o $U/usys.o $U/ulib.o
-	$(OBJCOPY) -S $U/_init $U/init.asm
-
-# 3. 修改 _fstest 的链接规则 (加上 $U/ulib.o)
-$U/_fstest: $U/fstest.o $U/usys.o $U/ulib.o
-	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_fstest $U/fstest.o $U/usys.o $U/ulib.o
-	$(OBJCOPY) -S $U/_fstest $U/fstest.asm
-
-$U/_systest: $U/systest.o $U/usys.o $U/ulib.o
-	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $U/_systest $U/systest.o $U/usys.o $U/ulib.o
-	$(OBJCOPY) -S $U/_systest $U/systest.asm
+$U/_%: $U/%.o $U/usys.o $U/ulib.o
+	$(CC) $(ULDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	$(OBJCOPY) -S $@ $U/$*.asm
 
 all: kernel.elf fs.img
 

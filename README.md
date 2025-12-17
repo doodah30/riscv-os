@@ -1,101 +1,133 @@
-这是 **从零构建操作系统 (riscv-os)** 的第六个实验阶段。
-在本实验中，我们打破了内核的壁垒，实现了**用户态（User Mode）**与**内核态（Kernel Mode）**的安全隔离与交互机制。操作系统现在能够运行受限的用户进程，并通过系统调用请求内核服务。
+这是 **从零构建操作系统 (riscv-os)** 的扩展实验项目。
+在本实验中，我们将 xv6 原生的简单轮转调度器（Round-Robin）改造成了一个支持 **动态优先级** 的调度器。
 
-## 实验目标
-1.  **特权级切换**：实现用户态到内核态的上下文切换机制（Trap Mechanism）。
-2.  **内存隔离**：建立用户虚拟地址空间布局，包括特殊的 `TRAMPOLINE` 和 `TRAPFRAME` 映射。
-3.  **系统调用框架**：实现 `syscall` 分发器，处理 `ecall` 指令。
-4.  **核心系统调用**：实现 `fork` (进程创建), `wait` (进程回收), `exit` (进程退出), `write` (输出), `getpid` 等基础调用。
-5.  **安全检查**：确保用户程序不能访问内核内存（基于页表权限位 `PTE_U` 的检查）。
+## 实验目标与特性
 
-## 完成功能特性
+1.  **优先级支持**：进程拥有 `priority` 属性 (0-10, 10最高)，调度器总是优先选择优先级最高的 `RUNNABLE` 进程。
+2.  **同级公平性 (Round-Robin)**：当多个进程优先级相同时，调度器根据已运行时间 (`ticks`) 进行公平轮转，避免先来先服务 (FCFS)。
+3.  **防饥饿老化 (Aging)**：引入老化机制，当低优先级进程等待时间过长时，动态提升其优先级。
+4.  **系统调用**：新增 `setpriority` (设置优先级) 和 `ps` (查看进程状态) 系统调用。
 
-- **Trap 机制**：编写了 `trampoline.S` 汇编代码，实现了 `uservec`（保存用户上下文）和 `userret`（恢复用户上下文）。
-- **内存映射**：在内核页表和用户页表的最高地址（`MAXVA`）处统一映射了跳板页（Trampoline），解决了页表切换时的地址连续性问题。
-- **参数传递**：实现了 `argint`, `argaddr` 等辅助函数，从 Trapframe 的寄存器（`a0`-`a7`）中提取系统调用参数。
-- **安全数据传输**：实现了 `copyin`/`copyout`，在内核与用户空间传输数据时严格检查 `PTE_U` 权限，防止恶意指针攻击。
-- **综合测试**：编写了用户态测试程序 `systest.c`，全面验证功能与安全性。
+## 测试指南：如何复现三种调度场景
 
-## 技术架构：Trap 处理流
+为了验证调度器的不同特性，我们需要**修改内核代码**（开启/关闭 Aging）以及**切换用户测试程序**。
 
-当用户程序执行系统调用（如 `write`）时，CPU 的执行流如下：
+### 核心配置文件说明
 
-```mermaid
-sequenceDiagram
-    participant User as 用户程序 (User)
-    participant Tramp as Trampoline.S
-    participant Trap as Trap.c (Kernel)
-    participant Sys as Syscall.c (Kernel)
+1.  **内核配置** (`kernel/proc.c`): 控制是否开启老化 (Aging) 机制。
+2.  **启动配置** (`user/init.c`): 控制启动时运行哪个测试程序 (`prio_test` 或 `same_prio_test`)。
 
-    User->>Tramp: ecall 指令 (触发异常)
-    Note right of User: 从 U-mode 切换到 S-mode
-    Tramp->>Tramp: uservec: 保存用户寄存器到 Trapframe
-    Tramp->>Trap: 切换页表 -> 跳转到 usertrap()
-    Trap->>Sys: 检查 scause=8 -> 调用 syscall()
-    Sys->>Sys: 根据 a7 寄存器分发到 sys_write
-    Sys-->>Trap: 返回结果 (存入 trapframe->a0)
-    Trap->>Tramp: usertrapret(): 准备返回
-    Tramp->>User: userret: 恢复寄存器 -> sret 指令
-```
+---
+
+### 场景 1：同级轮转 (Round-Robin)
+**目标**：验证当优先级相同时，两个进程能否公平地交替运行。
+
+1.  **修改内核 (`kernel/proc.c`)**：**关闭 Aging**
+    *   找到 `update_process_times` 函数。
+    *   **注释掉** 优先级提升的代码，防止干扰测试。
+    ```c
+    // kernel/proc.c -> update_process_times
+    if(p->state == RUNNABLE) {
+      p->wait_time++;
+      /* 注释掉下面这段 Aging 逻辑
+      if(p->wait_time > AGING_THRESHOLD) {
+          if(p->priority < MAX_PRIO) p->priority++;
+          p->wait_time = 0;
+      }
+      */
+    }
+    ```
+
+2.  **修改启动项 (`user/init.c`)**：运行 `same_prio_test`
+    ```c
+    // user/init.c -> main
+    char *argv[] = { "same_prio_test", 0 };
+    exec("same_prio_test", argv);
+    ```
+
+3.  **运行**：
+    ```bash
+    make clean && make qemu
+    ```
+    **预期结果**：输出乱序（并发），Snapshot 中两个进程 `TICKS` 数量几乎相等 (e.g., 443 vs 443)。
+
+---
+
+### 场景 2：严格优先级 (Strict Priority)
+**目标**：验证高优先级进程是否能完全压制低优先级进程（低优先级饿死）。
+
+1.  **修改内核 (`kernel/proc.c`)**：**关闭 Aging** (同场景 1)
+    *   保持 Aging 代码被注释的状态。
+
+2.  **修改启动项 (`user/init.c`)**：运行 `prio_test`
+    ```c
+    // user/init.c -> main
+    char *argv[] = { "prio_test", 0 };
+    exec("prio_test", argv);
+    ```
+
+3.  **运行**：
+    ```bash
+    make clean && make qemu
+    ```
+    **预期结果**：High Prio 先打印 finished。Snapshot 中 High Prio 已经跑完 (ZOMBIE)，Low Prio 还没开始跑 (TICKS=0)。
+
+---
+
+### 场景 3：老化机制 (Aging)
+**目标**：验证低优先级进程在等待足够长的时间后，能否被提升优先级并获得 CPU。
+
+1.  **修改内核 (`kernel/proc.c`)**：**开启 Aging**
+    *   找到 `update_process_times` 函数。
+    *   **解除注释**，恢复 Aging 逻辑。
+    ```c
+    // kernel/proc.c -> update_process_times
+    if(p->state == RUNNABLE) {
+      p->wait_time++;
+      // === 解除注释 ===
+      if(p->wait_time > AGING_THRESHOLD) {
+          if(p->priority < MAX_PRIO) p->priority++;
+          p->wait_time = 0;
+      }
+      // ===============
+    }
+    ```
+
+2.  **修改启动项 (`user/init.c`)**：运行 `prio_test` (同场景 2)
+    *   保持运行 `prio_test`。
+
+3.  **运行**：
+    ```bash
+    make clean && make qemu
+    ```
+    **预期结果**：Low Prio 不再为 0 TICKS。Snapshot 中可以看到 Low Prio 的优先级从初始值 (2) 被提升到了更高 (如 9 或 10)。Low Prio 最终能完成运行。
+
+---
 
 ## 关键文件说明
 
-| 文件路径 | 说明 |
+| 文件 | 说明 |
 | :--- | :--- |
-| `kernel/trampoline.S` | **核心汇编**：用户态与内核态切换的跳板代码 |
-| `kernel/trap.c` | **中断处理**：`usertrap` (处理异常/系统调用) 和 `usertrapret` (返回用户态) |
-| `kernel/syscall.c` | **分发器**：定义系统调用号与处理函数的映射，参数解析 |
-| `kernel/sysproc.c` | **进程类实现**：`sys_fork`, `sys_exit`, `sys_wait`, `sys_getpid` 等 |
-| `kernel/vm.c` | **内存安全**：`copyin`/`copyout` 及其权限检查逻辑 |
-| `user/systest.c` | **测试程序**：专门用于测试各项系统调用的 C 语言程序 |
+| `kernel/proc.h` | 增加了 `priority`, `ticks`, `wait_time` 字段 |
+| `kernel/proc.c` | **`scheduler`**: 实现了寻找最高优先级 + 同级 tick 均衡的逻辑<br>**`update_process_times`**: 实现了 Aging 逻辑 |
+| `kernel/sysproc.c` | 实现了 `sys_setpriority` 和 `sys_ps` |
+| `user/prio_test.c` | 测试高低优先级进程的竞争 (用于场景 2 和 3) |
+| `user/same_prio_test.c` | 测试同级优先级进程的轮转 (用于场景 1) |
+| `user/ps.c` | 用户态进程查看工具 |
 
-## 编译与运行
+## 调度算法伪代码
 
-由于系统调用的测试依赖于进程加载（Exec），本分支已包含基础的文件系统支持。
-
-```bash
-# 编译并启动 QEMU
-make qemu
+```c
+// 1. 遍历所有 RUNNABLE 进程
+for p in proc:
+    // 策略 A: 优先级更高者优先
+    if p.priority > max_prio:
+        best = p
+    
+    // 策略 B: 优先级相同时，运行时间(ticks)少者优先 (Round-Robin)
+    else if p.priority == max_prio:
+        if p.ticks < best.ticks:
+            best = p
 ```
-
-系统启动后，`init` 进程会自动加载并运行 `systest` 测试程序。
-
-## 测试结果与分析
-
-以下是 `systest` 在 QEMU 中的实际运行输出：
-
-```text
-=== Starting Lab 6 System Call Tests ===
-[TEST] Basic Syscalls (getpid, fork, wait, exit)...
-  Current PID: 2
-  Child exiting with magic status 88...
-  Parent received correct status: 88
-PASSED
-[TEST] Parameter Passing (write)...
-Hello
-PASSED
-[TEST] Security (Invalid Pointers)...
-  Write to kernel addr handled correctly (ret=-1)
-  Read to kernel addr handled correctly (ret=-1)
-PASSED
-[TEST] System Call Performance...
-  100000 getpid() calls took 1246 ms
-  Average: 12.4 us per call
-PASSED
-=== All Lab 6 Tests Passed! ===
-```
-
-### 结果解读
-1.  **基础功能 (Basic)**：
-    *   测试了 `fork` 创建子进程，子进程通过 `exit(88)` 退出。
-    *   父进程通过 `wait` 成功捕获到了状态码 **88**，证明进程间通信（IPC）和生命周期管理逻辑正确。
-2.  **参数传递 (Parameter)**：
-    *   `write` 成功输出了字符串，证明内核能正确从用户栈读取数据指针和长度。
-3.  **安全性 (Security)**：
-    *   测试程序尝试向内核地址 `0x80000000` 写入数据。
-    *   内核**没有崩溃**，而是返回了 `-1`。这证明 `walkaddr` 成功拦截了非法指针（检测到该地址没有 `PTE_U` 权限）。
-4.  **性能 (Performance)**：
-    *   单次空载系统调用 (`getpid`) 耗时约 **12.4 微秒**。
-    *   这表明 Trap 处理路径（寄存器保存/恢复、页表切换）效率很高，没有不必要的性能损耗。
 
 ---

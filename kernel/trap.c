@@ -26,6 +26,8 @@ extern void trampoline();
 extern void uservec();
 extern void userret();
 
+extern void update_process_times(void);
+
 // 初始化时钟锁
 void trapinit(void) {
   initlock(&tickslock, "time");
@@ -145,6 +147,7 @@ clockintr()
 {
   acquire(&tickslock); // 获取锁
   ticks++;             // 计数增加
+  update_process_times();
   wakeup(&ticks);      // 唤醒所有在 sleep(&ticks) 的进程
   release(&tickslock); // 释放锁
 

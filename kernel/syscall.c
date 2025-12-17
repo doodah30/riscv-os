@@ -27,6 +27,9 @@ extern uint64 sys_chdir(void);
 extern uint64 sys_dup(void);
 extern uint64 sys_exec(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_setpriority(void);
+extern uint64 sys_getpriority(void);
+extern uint64 sys_ps(void);
 
 // 获取第 n 个整数参数
 int argint(int n, int *ip) {
@@ -112,6 +115,9 @@ static uint64 (*syscalls[])(void) = {
 //[SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_setpriority]   sys_setpriority,
+[SYS_getpriority]   sys_getpriority,
+[SYS_ps]   sys_ps,
 };
 
 void syscall(void) {

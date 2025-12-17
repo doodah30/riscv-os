@@ -53,3 +53,8 @@ void* malloc(uint);
 void free(void*);
 
 int sleep(int);
+
+int setpriority(int, int);
+int getpriority(int);
+
+int ps(void);

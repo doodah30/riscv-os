@@ -110,3 +110,18 @@ uptime:
  li a7, SYS_uptime
  ecall
  ret
+.global setpriority
+setpriority:
+ li a7, SYS_setpriority
+ ecall
+ ret
+.global getpriority
+getpriority:
+ li a7, SYS_getpriority
+ ecall
+ ret
+.global ps
+ps:
+ li a7, SYS_ps
+ ecall
+ ret

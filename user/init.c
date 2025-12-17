@@ -26,8 +26,16 @@ int main() {
     //char *argv[] = { "fstest", 0 };
     //exec("fstest", argv);
     // === 执行 systest ===
-    char *argv[] = { "systest", 0 };
-    exec("systest", argv);
+    //char *argv[] = { "systest", 0 };
+    //exec("systest", argv);
+    // ===========================
+    // === 执行 prio_test ===
+    //char *argv[] = { "prio_test", 0 };
+    //exec("prio_test", argv);
+    // ===========================
+    // === 执行 prio_test ===
+    char *argv[] = { "same_prio_test", 0 };
+    exec("same_prio_test", argv);
     // ===========================
     printf("init: exec fstest failed\n");
     exit(1);

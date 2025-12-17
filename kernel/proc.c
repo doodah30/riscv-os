@@ -118,6 +118,10 @@ found:
     p->pid = allocpid();
     p->state = USED;
 
+    p->priority = DEFAULT_PRIO;
+    p->ticks = 0;
+    p->wait_time = 0;
+
     // 分配陷阱帧 (如果尚未分配)
     if((p->trapframe = (struct trapframe *)kalloc()) == 0){
         release(&p->lock);
@@ -140,38 +144,92 @@ found:
     return p;
 }
 
+// 每次时钟中断调用一次，更新统计信息并执行 Aging
+void update_process_times() {
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->state == RUNNABLE) {
+      p->wait_time++;
+      // Aging 机制：如果等待太久，提升优先级
+      /*
+      if(p->wait_time > AGING_THRESHOLD) {
+          if(p->priority < MAX_PRIO) {
+              p->priority++;
+              // printf("PID %d aged to priority %d\n", p->pid, p->priority); // 调试用
+          }
+          p->wait_time = 0; // 重置等待时间
+      }*/
+    } else if(p->state == RUNNING) {
+      p->ticks++;      // 记录 CPU 时间
+      p->wait_time = 0; // 正在运行，等待时间清零
+    }
+    release(&p->lock);
+  }
+}
+
 // 调度器：在死循环中寻找 RUNNABLE 的进程并运行
 void scheduler(void) {
     struct proc *p;
     struct cpu *c = mycpu();
+    struct proc *best_p;
     
     c->proc = 0;
     for(;;){
         intr_on();
-        int found = 0;
+        best_p = 0;
+        int max_prio = -1;
+        // 1. 遍历寻找最高优先级的 RUNNABLE 进程
         for(p = proc; p < &proc[NPROC]; p++) {
-            acquire(&p->lock);
-            if(p->state == RUNNABLE) {
-                // 切换到进程 p
-                p->state = RUNNING;
-                c->proc = p;
-                
-                // 上下文切换
-                swtch(&c->context, &p->context);
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+          
+          // 情况 1: 发现优先级更高的，直接换
+          if(p->priority > max_prio) {
+              if(best_p != 0) release(&best_p->lock);
+              max_prio = p->priority;
+              best_p = p;
+              continue; // 拿到锁了，继续下一个
+          }
+          
+          // 情况 2: 优先级相同，通过比较 ticks 来实现轮转 (Fairness/RR)
+          if(p->priority == max_prio) {
+              if(best_p != 0) {
+                  // 如果当前 p 跑得比 best_p 少，那就选 p
+                  // 这会让 ticks 大的进程让路，实现轮转
+                  if(p->ticks < best_p->ticks) {
+                      release(&best_p->lock);
+                      best_p = p;
+                      continue;
+                  }
+              } else {
+                  // 之前没选中过（max_prio 初始是 -1 的情况），选它
+                  max_prio = p->priority;
+                  best_p = p;
+                  continue;
+              }
+          }
+      }
+      release(&p->lock);
+    }
 
-                // 进程运行结束或让出 CPU，回到这里
+        // 2. 如果找到了最佳进程
+        if(best_p != 0) {
+            // 此时我们持有 best_p->lock
+            if(best_p->state == RUNNABLE) {
+                best_p->state = RUNNING;
+                best_p->wait_time = 0; // 只要运行了，等待时间清零
+                
+                c->proc = best_p;
+                swtch(&c->context, &best_p->context);
                 c->proc = 0;
-                found = 1;
             }
-            release(&p->lock);
-        }
-        
-        // 如果没有进程可运行，可以稍微停顿一下避免空转过热 (wfi)
-        if(found == 0) {
-            intr_on();
+            release(&best_p->lock);
+        } else {
+            // 没有进程可跑，等待中断（省电）
             asm volatile("wfi");
         }
-    }
+  }
 }
 
 // 放弃 CPU (yield)

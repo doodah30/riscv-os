@@ -2,14 +2,12 @@
 *.o
 *.d
 *.asm
+_*
 
 # 链接产生的最终可执行文件
 kernel.elf
 fs.img
-_init
-_fstest
 mkfs
-_systest
 
 *~
 .DS_Store

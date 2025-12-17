@@ -113,3 +113,27 @@ void printf(const char *fmt, ...) {
   }
   va_end(ap);
 }
+
+int atoi(const char *s)
+{
+  int n;
+  int sign = 1;
+
+  // 跳过空白符
+  while(*s == ' ' || *s == '\t')
+    s++;
+
+  // 处理符号
+  if(*s == '-') {
+      sign = -1;
+      s++;
+  } else if(*s == '+') {
+      s++;
+  }
+
+  n = 0;
+  while(*s >= '0' && *s <= '9')
+    n = n * 10 + *s++ - '0';
+
+  return n * sign;
+}
